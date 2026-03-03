@@ -1,5 +1,6 @@
 """Node routing components for selecting proxy nodes and tracking outcomes."""
 
+import asyncio
 import logging
 from dataclasses import dataclass
 from typing import List, Optional, Tuple
@@ -68,20 +69,24 @@ class NodeRouter:
 
     def report_outcome(self, node_id: str, success: bool, latency_ms: int, bytes_transferred: int) -> None:
         """Report the outcome of a routing decision to update node health scores."""
+        async def _do_report():
+            try:
+                headers = {"X-Internal-API-Key": "test_secret"}
+                await self._client.post(
+                    f"{self._settings.COORDINATION_API_URL}/internal/route/report",
+                    json={
+                        "node_id": node_id,
+                        "success": success,
+                        "latency_ms": latency_ms,
+                        "bytes": bytes_transferred,
+                    },
+                    headers=headers,
+                    timeout=5.0,
+                )
+            except Exception:
+                logger.exception("Failed to report outcome for node %s", node_id)
+
         try:
-            # Non-blocking fire-and-forget
-            headers = {"X-Internal-API-Key": "test_secret"}
-            self._client.post(
-                f"{self._settings.COORDINATION_API_URL}/internal/route/report",
-                json={
-                    "node_id": node_id,
-                    "success": success,
-                    "latency_ms": latency_ms,
-                    "bytes": bytes_transferred,
-                },
-                headers=headers,
-                timeout=5.0,
-            )
-        except Exception:
-            # Non-critical, log and continue
-            logger.exception("Failed to report outcome for node %s", node_id)
+            asyncio.get_event_loop().create_task(_do_report())
+        except RuntimeError:
+            logger.warning("No event loop to schedule report for node %s", node_id)

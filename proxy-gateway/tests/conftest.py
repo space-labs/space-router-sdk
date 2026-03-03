@@ -4,11 +4,22 @@ import httpx
 import pytest
 import respx
 
+from app import auth as auth_module
 from app.auth import AuthValidator
 from app.config import Settings
 from app.logger import RequestLogger
 from app.rate_limiter import RateLimiter
 from app.routing import NodeRouter
+
+
+@pytest.fixture(autouse=True)
+def _clear_auth_cache():
+    """Clear the global auth validation cache between tests."""
+    auth_module.VALIDATION_CACHE.clear()
+    auth_module.VALIDATION_EXPIRATIONS.clear()
+    yield
+    auth_module.VALIDATION_CACHE.clear()
+    auth_module.VALIDATION_EXPIRATIONS.clear()
 
 
 @pytest.fixture
@@ -23,7 +34,6 @@ def settings():
         DEFAULT_RATE_LIMIT_RPM=60,
         NODE_REQUEST_TIMEOUT=5.0,
         AUTH_CACHE_TTL=300,
-        BUFFER_SIZE=65536,
         LOG_LEVEL="DEBUG",
     )
 

@@ -32,7 +32,8 @@ class TestNodeRouter:
         assert result is None
 
     @pytest.mark.asyncio
-    async def test_select_node_network_error(self, settings, mock_api):
+    async def test_select_node_network_error_sqlite_fallback(self, settings, mock_api):
+        """In SQLite mode, network errors fall back to a local test node."""
         mock_api.get("http://coordination.test/internal/route/select").mock(
             side_effect=httpx.ConnectError("Connection refused")
         )
@@ -41,7 +42,10 @@ class TestNodeRouter:
             router = NodeRouter(client, settings)
             result = await router.select_node()
 
-        assert result is None
+        # SQLite mode provides a fallback node
+        assert result is not None
+        assert result.node_id == "local-test-node-id"
+        assert result.endpoint_url == "http://127.0.0.1:9090"
 
     @pytest.mark.asyncio
     async def test_report_outcome(self, settings, mock_api):

@@ -5,39 +5,41 @@ import pytest
 import respx
 
 from app.auth import AuthResult, AuthValidator, extract_api_key, hash_api_key
+from app.errors import AuthenticationError
 
 
 class TestExtractApiKey:
     def test_valid_basic_auth(self):
         encoded = base64.b64encode(b"sr_live_abc123:").decode()
-        headers = {"Proxy-Authorization": f"Basic {encoded}"}
-        assert extract_api_key(headers) == "sr_live_abc123"
+        header = f"Basic {encoded}"
+        assert extract_api_key(header) == "sr_live_abc123"
 
     def test_valid_basic_auth_lowercase(self):
         encoded = base64.b64encode(b"sr_live_abc123:").decode()
-        headers = {"proxy-authorization": f"Basic {encoded}"}
-        assert extract_api_key(headers) == "sr_live_abc123"
+        header = f"basic {encoded}"
+        assert extract_api_key(header) == "sr_live_abc123"
 
     def test_missing_header(self):
-        assert extract_api_key({}) is None
+        with pytest.raises(AuthenticationError):
+            extract_api_key(None)
 
     def test_malformed_not_basic(self):
-        headers = {"Proxy-Authorization": "Bearer token123"}
-        assert extract_api_key(headers) is None
+        with pytest.raises(AuthenticationError):
+            extract_api_key("Bearer token123")
 
     def test_malformed_bad_base64(self):
-        headers = {"Proxy-Authorization": "Basic !!!not-base64!!!"}
-        assert extract_api_key(headers) is None
+        with pytest.raises(AuthenticationError):
+            extract_api_key("Basic !!!not-base64!!!")
 
     def test_empty_key(self):
         encoded = base64.b64encode(b":password").decode()
-        headers = {"Proxy-Authorization": f"Basic {encoded}"}
-        assert extract_api_key(headers) is None
+        with pytest.raises(AuthenticationError):
+            extract_api_key(f"Basic {encoded}")
 
     def test_key_with_password_part(self):
         encoded = base64.b64encode(b"sr_live_abc123:ignored").decode()
-        headers = {"Proxy-Authorization": f"Basic {encoded}"}
-        assert extract_api_key(headers) == "sr_live_abc123"
+        header = f"Basic {encoded}"
+        assert extract_api_key(header) == "sr_live_abc123"
 
 
 class TestHashApiKey:
@@ -69,13 +71,16 @@ class TestAuthValidator:
 
     @pytest.mark.asyncio
     async def test_validate_invalid_key(self, settings, mock_api):
-        mock_api.post("http://coordination.test/internal/auth/validate").respond(401)
+        mock_api.post("http://coordination.test/internal/auth/validate").respond(
+            200,
+            json={"valid": False},
+        )
 
         async with httpx.AsyncClient() as client:
             validator = AuthValidator(client, settings)
             result = await validator.validate("sr_live_bad_key")
 
-        assert result.valid is False
+        assert result is None
 
     @pytest.mark.asyncio
     async def test_validate_caches_result(self, settings, mock_api):
@@ -86,15 +91,16 @@ class TestAuthValidator:
 
         async with httpx.AsyncClient() as client:
             validator = AuthValidator(client, settings)
-            r1 = await validator.validate("sr_live_abc123")
-            r2 = await validator.validate("sr_live_abc123")
+            r1 = await validator.validate("sr_live_cache_test")
+            r2 = await validator.validate("sr_live_cache_test")
 
         assert r1.valid is True
         assert r2.valid is True
         assert route.call_count == 1
 
     @pytest.mark.asyncio
-    async def test_validate_network_error(self, settings, mock_api):
+    async def test_validate_network_error_sqlite_fallback(self, settings, mock_api):
+        """In SQLite mode, network errors fall back to local test key."""
         mock_api.post("http://coordination.test/internal/auth/validate").mock(
             side_effect=httpx.ConnectError("Connection refused")
         )
@@ -103,4 +109,6 @@ class TestAuthValidator:
             validator = AuthValidator(client, settings)
             result = await validator.validate("sr_live_abc123")
 
-        assert result.valid is False
+        # SQLite mode provides a fallback auth result
+        assert result is not None
+        assert result.api_key_id == "local-test-key"

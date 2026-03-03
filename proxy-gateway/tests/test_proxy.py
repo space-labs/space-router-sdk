@@ -13,10 +13,17 @@ from app.routing import NodeRouter, NodeSelection
 
 
 class FakeAuthValidator:
-    def __init__(self, result: AuthResult | None = None):
-        self._result = result or AuthResult(valid=True, api_key_id="test-key-id", rate_limit_rpm=60)
+    """Fake auth validator that returns a configurable result.
 
-    async def validate(self, api_key: str) -> AuthResult:
+    Pass result=None to simulate auth failure (proxy checks `if not auth_result`).
+    Default: valid auth with test key.
+    """
+    _DEFAULT = AuthResult(valid=True, api_key_id="test-key-id", rate_limit_rpm=60)
+
+    def __init__(self, result: AuthResult | None = _DEFAULT):
+        self._result = result
+
+    async def validate(self, api_key: str) -> AuthResult | None:
         return self._result
 
 
@@ -101,7 +108,7 @@ class TestProxyServerAuth:
             COORDINATION_API_SECRET="s",
         )
         proxy = ProxyServer(
-            auth_validator=FakeAuthValidator(AuthResult(valid=False)),
+            auth_validator=FakeAuthValidator(None),  # None = auth failed
             node_router=FakeNodeRouter(),
             rate_limiter=RateLimiter(),
             request_logger=FakeRequestLogger(),
