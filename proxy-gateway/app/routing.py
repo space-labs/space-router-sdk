@@ -31,7 +31,7 @@ class NodeRouter:
         """Select the best available node for routing traffic."""
         try:
             # For SQLite testing, add the API key header
-            headers = {"X-Internal-API-Key": "test_secret"}
+            headers = {"X-Internal-API-Key": self._settings.COORDINATION_API_SECRET}
             
             response = await self._client.get(
                 f"{self._settings.COORDINATION_API_URL}/internal/route/select",
@@ -71,7 +71,7 @@ class NodeRouter:
         """Report the outcome of a routing decision to update node health scores."""
         async def _do_report():
             try:
-                headers = {"X-Internal-API-Key": "test_secret"}
+                headers = {"X-Internal-API-Key": self._settings.COORDINATION_API_SECRET}
                 await self._client.post(
                     f"{self._settings.COORDINATION_API_URL}/internal/route/report",
                     json={
