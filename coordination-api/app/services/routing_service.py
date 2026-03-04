@@ -24,10 +24,11 @@ class ProxyNode:
 class RoutingService:
     """Selects optimal nodes for routing traffic."""
 
-    def __init__(self, http_client: httpx.AsyncClient, settings: Settings) -> None:
+    def __init__(self, http_client: httpx.AsyncClient, settings: Settings, db=None) -> None:
         self._client = http_client
         self._settings = settings
-        
+        self._db = db
+
         # Local cache of nodes for SQLite implementation
         self._nodes_cache: Dict[str, ProxyNode] = {}
         self._node_health: Dict[str, float] = {}
@@ -43,23 +44,38 @@ class RoutingService:
 
     async def _select_node_sqlite(self) -> Optional[ProxyNode]:
         """Select a node using SQLite data."""
-        # For testing, we'll use the first available node or a local node
-        # In a real implementation, this would make a weighted random choice
-        
-        # If we have cached nodes, return one randomly
-        if self._nodes_cache:
-            node_ids = list(self._nodes_cache.keys())
-            selected_id = random.choice(node_ids)
-            return self._nodes_cache[selected_id]
-            
-        # For testing, create a mock local node
-        node = ProxyNode(
-            node_id="local-test-node-id",
-            endpoint_url="http://127.0.0.1:9090",
-            health_score=1.0
-        )
-        self._nodes_cache[node.node_id] = node
-        return node
+        if self._db is None:
+            logger.warning("No database configured for node selection")
+            return self._get_fallback_node()
+
+        try:
+            rows = await self._db.select(
+                "nodes",
+                params={"status": "online"},
+            )
+            if not rows:
+                logger.warning("No online nodes found in database")
+                return None
+
+            # Weighted random selection based on health_score
+            selected = random.choices(
+                rows,
+                weights=[r.get("health_score", 1.0) for r in rows],
+                k=1,
+            )[0]
+
+            node = ProxyNode(
+                node_id=selected["id"],
+                endpoint_url=selected["endpoint_url"],
+                health_score=selected.get("health_score", 1.0),
+            )
+
+            # Update local cache
+            self._nodes_cache[node.node_id] = node
+            return node
+        except Exception as e:
+            logger.error("SQLite node selection error: %s", e)
+            return None
 
     def _get_fallback_node(self) -> Optional[ProxyNode]:
         """Get a fallback proxy provider when no residential nodes are available."""
@@ -100,16 +116,37 @@ class RoutingService:
         self, node_id: str, success: bool, latency_ms: int, bytes_transferred: int
     ) -> None:
         """Record a routing outcome using SQLite."""
-        # Update the health score in our local cache
-        if node_id in self._nodes_cache:
+        if self._db is None:
+            return
+
+        try:
+            # Insert into route_outcomes table
+            await self._db.insert(
+                "route_outcomes",
+                {
+                    "node_id": node_id,
+                    "success": 1 if success else 0,
+                    "latency_ms": latency_ms,
+                    "bytes_transferred": bytes_transferred,
+                },
+                return_rows=False,
+            )
+
+            # Update node health score
+            current = self._node_health.get(node_id, 1.0)
             if success:
-                # Slightly increase health score for successful requests
-                self._node_health[node_id] = min(1.0, self._node_health.get(node_id, 0.9) + 0.1)
+                new_score = min(1.0, current + 0.1)
             else:
-                # Significantly decrease health score for failed requests
-                self._node_health[node_id] = max(0.1, self._node_health.get(node_id, 0.5) - 0.3)
-                
-            # Update the node health score
-            self._nodes_cache[node_id].health_score = self._node_health[node_id]
-            
-        # In a real implementation, this would write to the database
+                new_score = max(0.1, current - 0.3)
+            self._node_health[node_id] = new_score
+
+            if node_id in self._nodes_cache:
+                self._nodes_cache[node_id].health_score = new_score
+
+            await self._db.update(
+                "nodes",
+                {"health_score": new_score},
+                params={"id": node_id},
+            )
+        except Exception as e:
+            logger.error("SQLite outcome report error: %s", e)
