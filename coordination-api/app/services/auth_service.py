@@ -18,7 +18,7 @@ CACHE_EXPIRATIONS: Dict[str, float] = {}
 class AuthService:
     """Authenticates API key requests."""
 
-    def __init__(self, http_client: httpx.AsyncClient, settings: Settings, *, db=None) -> None:
+    def __init__(self, http_client: httpx.AsyncClient, settings: Settings, db=None) -> None:
         self._client = http_client
         self._settings = settings
         self._db = db
@@ -55,8 +55,9 @@ class AuthService:
                 single=True,
             )
             if row is None:
-                logger.info("API key hash not found or inactive")
+                logger.debug("No active API key found for hash %s...", key_hash[:12])
                 return None
+
             return {
                 "api_key_id": row["id"],
                 "rate_limit_rpm": row.get("rate_limit_rpm", 60),

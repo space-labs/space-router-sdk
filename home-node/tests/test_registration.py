@@ -120,10 +120,96 @@ class TestRegisterNode:
         req = respx.calls[0].request
         import json
         body = json.loads(req.content)
-        assert body["endpoint_url"] == "http://1.2.3.4:9090"
+        assert body["endpoint_url"] == "https://1.2.3.4:9090"
+        assert body["public_ip"] == "1.2.3.4"
+        assert body["connectivity_type"] == "direct"
         assert body["node_type"] == "residential"
         assert body["region"] == "us-west"
         assert body["label"] == "test-node"
+
+    @pytest.mark.asyncio
+    @respx.mock
+    async def test_register_with_upnp_endpoint(self, reg_settings):
+        respx.post("http://coordination:8000/nodes").mock(
+            return_value=Response(201, json={
+                "id": "node-upnp-456",
+                "endpoint_url": "https://203.0.113.5:9090",
+                "public_ip": "1.2.3.4",
+                "connectivity_type": "upnp",
+                "node_type": "residential",
+                "status": "online",
+                "health_score": 1.0,
+                "region": "us-west",
+                "label": "test-node",
+                "created_at": "2026-01-01T00:00:00Z",
+            })
+        )
+
+        import httpx
+        async with httpx.AsyncClient() as client:
+            node_id = await register_node(
+                client, reg_settings, "1.2.3.4",
+                upnp_endpoint=("203.0.113.5", 9090),
+            )
+
+        assert node_id == "node-upnp-456"
+
+        req = respx.calls[0].request
+        import json
+        body = json.loads(req.content)
+        assert body["endpoint_url"] == "https://203.0.113.5:9090"
+        assert body["public_ip"] == "1.2.3.4"
+        assert body["connectivity_type"] == "upnp"
+
+    @pytest.mark.asyncio
+    @respx.mock
+    async def test_register_receives_ip_classification(self, reg_settings):
+        """Registration response with ip_type/ip_region should be parsed without error."""
+        respx.post("http://coordination:8000/nodes").mock(
+            return_value=Response(201, json={
+                "id": "node-classified",
+                "endpoint_url": "https://1.2.3.4:9090",
+                "public_ip": "1.2.3.4",
+                "connectivity_type": "direct",
+                "node_type": "residential",
+                "status": "online",
+                "health_score": 1.0,
+                "region": "us-west",
+                "label": "test-node",
+                "ip_type": "residential",
+                "ip_region": "Portland, US",
+                "created_at": "2026-01-01T00:00:00Z",
+            })
+        )
+
+        import httpx
+        async with httpx.AsyncClient() as client:
+            node_id = await register_node(client, reg_settings, "1.2.3.4")
+
+        assert node_id == "node-classified"
+
+    @pytest.mark.asyncio
+    @respx.mock
+    async def test_register_handles_missing_ip_classification(self, reg_settings):
+        """Registration response without ip_type/ip_region should default to 'unknown'."""
+        respx.post("http://coordination:8000/nodes").mock(
+            return_value=Response(201, json={
+                "id": "node-no-class",
+                "endpoint_url": "https://1.2.3.4:9090",
+                "node_type": "residential",
+                "status": "online",
+                "health_score": 1.0,
+                "created_at": "2026-01-01T00:00:00Z",
+                # No ip_type or ip_region — code uses .get() with "unknown" default
+            })
+        )
+
+        import httpx
+        async with httpx.AsyncClient() as client:
+            node_id = await register_node(client, reg_settings, "1.2.3.4")
+
+        # Should succeed without KeyError
+        assert node_id == "node-no-class"
 
     @pytest.mark.asyncio
     @respx.mock

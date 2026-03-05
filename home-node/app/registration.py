@@ -49,15 +49,31 @@ async def register_node(
     http_client: httpx.AsyncClient,
     settings: Settings,
     public_ip: str,
+    *,
+    upnp_endpoint: tuple[str, int] | None = None,
 ) -> str:
     """Register this node with the Coordination API.
+
+    If *upnp_endpoint* is provided (``(external_ip, external_port)``),
+    the ``endpoint_url`` uses the UPnP-mapped address and the residential
+    *public_ip* is sent as metadata.  Otherwise falls back to the public
+    IP with the configured port (requires manual port forwarding).
 
     Returns the ``node_id`` assigned by the API.
     Raises on failure — the caller should abort startup.
     """
-    endpoint_url = f"http://{public_ip}:{settings.NODE_PORT}"
+    if upnp_endpoint:
+        upnp_ip, upnp_port = upnp_endpoint
+        endpoint_url = f"https://{upnp_ip}:{upnp_port}"
+        connectivity_type = "upnp"
+    else:
+        endpoint_url = f"https://{public_ip}:{settings.NODE_PORT}"
+        connectivity_type = "direct"
+
     payload = {
         "endpoint_url": endpoint_url,
+        "public_ip": public_ip,
+        "connectivity_type": connectivity_type,
         "node_type": settings.NODE_TYPE,
     }
     if settings.NODE_REGION:
@@ -66,13 +82,21 @@ async def register_node(
         payload["label"] = settings.NODE_LABEL
 
     url = f"{settings.COORDINATION_API_URL}/nodes"
-    logger.info("Registering node at %s → %s", url, endpoint_url)
+    logger.info(
+        "Registering node at %s → endpoint=%s public_ip=%s connectivity=%s",
+        url, endpoint_url, public_ip, connectivity_type,
+    )
 
     resp = await http_client.post(url, json=payload, timeout=15.0)
     resp.raise_for_status()
     data = resp.json()
     node_id = data["id"]
-    logger.info("Registered as node %s", node_id)
+    ip_type = data.get("ip_type", "unknown")
+    ip_region = data.get("ip_region", "unknown")
+    logger.info(
+        "Registered as node %s (ip_type=%s, ip_region=%s)",
+        node_id, ip_type, ip_region,
+    )
     return node_id
 
 

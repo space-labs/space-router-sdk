@@ -46,7 +46,13 @@ def parse_headers(raw: bytes) -> dict[str, str]:
 async def _read_request_head(reader: asyncio.StreamReader) -> tuple[bytes, str, str, str, dict[str, str]] | None:
     try:
         request_line = await asyncio.wait_for(reader.readuntil(b"\r\n"), timeout=30.0)
-    except (asyncio.TimeoutError, asyncio.IncompleteReadError, ConnectionResetError):
+    except asyncio.TimeoutError:
+        logger.warning("Timeout reading request line (30s)")
+        return None
+    except asyncio.IncompleteReadError:
+        return None
+    except ConnectionResetError:
+        logger.debug("ConnectionReset reading request line (likely health check)")
         return None
 
     parts = request_line.decode("latin-1").strip().split(" ", 2)
@@ -143,11 +149,14 @@ async def _connect_to_node(endpoint_url: str, timeout: float) -> NodeConnection 
     host = parsed.hostname
     port = parsed.port or (443 if parsed.scheme == "https" else 80)
     proxy_auth = _extract_proxy_auth(parsed)
-
     try:
         if parsed.scheme == "https":
             import ssl
             ctx = ssl.create_default_context()
+            # Home Nodes use self-signed certificates — skip verification.
+            # TLS still encrypts the connection in transit.
+            ctx.check_hostname = False
+            ctx.verify_mode = ssl.CERT_NONE
             reader, writer = await asyncio.wait_for(
                 asyncio.open_connection(host, port, ssl=ctx),
                 timeout=timeout,
@@ -259,9 +268,11 @@ async def handle_http_forward(
     try:
         # Build request to forward to home node (or upstream proxy)
         # Remove client's proxy-specific headers, keep the rest
+        _strip = ("proxy-authorization", "proxy-connection",
+                  "x-spacerouter-ip-type", "x-spacerouter-region")
         forward_headers = {
             k: v for k, v in headers.items()
-            if k.lower() not in ("proxy-authorization", "proxy-connection")
+            if k.lower() not in _strip
         }
         forward_headers["X-SpaceRouter-Request-Id"] = request_id
         # Add upstream proxy auth if the node endpoint has credentials
@@ -431,20 +442,21 @@ class ProxyServer:
                 return
 
             raw_head, method, target, version, headers = result
+            logger.debug("[%s] %s %s %s", request_id[:8], method, target, version)
 
             # --- Authentication ---
             # Get Proxy-Authorization header - use get() for dictionary access
             auth_header = headers.get("Proxy-Authorization", "")
-            
+
             try:
                 api_key = extract_api_key(auth_header)
             except Exception as e:
-                logger.error(f"Error extracting API key: {e}")
+                logger.error("[%s] Error extracting API key: %s", request_id[:8], e)
                 metrics["auth_failures"] += 1
                 writer.write(proxy_auth_required(request_id))
                 await writer.drain()
                 return
-            
+
             if not api_key:
                 metrics["auth_failures"] += 1
                 writer.write(proxy_auth_required(request_id))
@@ -469,13 +481,22 @@ class ProxyServer:
                 await writer.drain()
                 return
 
+            # --- Extract routing preferences ---
+            requested_ip_type = headers.get("X-SpaceRouter-IP-Type", "")
+            requested_region = headers.get("X-SpaceRouter-Region", "")
+
             # --- Node Selection ---
-            node = await self.node_router.select_node()
+            node = await self.node_router.select_node(
+                ip_type=requested_ip_type or None,
+                ip_region=requested_region or None,
+            )
             if node is None:
                 metrics["no_nodes"] += 1
                 writer.write(no_nodes_available(request_id))
                 await writer.drain()
                 return
+
+            logger.debug("[%s] Node selected: %s -> %s", request_id[:8], node.node_id, node.endpoint_url)
 
             # --- Route Request ---
             if method.upper() == "CONNECT":

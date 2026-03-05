@@ -4,7 +4,7 @@ import httpx
 import pytest
 
 from app.config import Settings
-from app.services.routing_service import RoutingService
+from app.services.routing_service import ProxyNode, RoutingService
 from app.sqlite_db import SQLiteClient
 
 
@@ -111,34 +111,30 @@ class TestGetFallbackNode:
 
 class TestSelectNode:
     @pytest.mark.asyncio
-    async def test_selects_db_node_when_online(self, tmp_path):
-        """Online nodes in the DB are returned instead of ProxyJet."""
+    async def test_selects_sqlite_node(self, tmp_path):
         db_path = str(tmp_path / "test.db")
         settings = Settings(
             USE_SQLITE=True,
             SQLITE_DB_PATH=db_path,
-            PROXYJET_HOST="proxy.proxyjet.io",
-            PROXYJET_PORT=1010,
-            PROXYJET_USERNAME="user",
-            PROXYJET_PASSWORD="pass",
         )
         db = SQLiteClient(db_path)
-
-        # Register an online node in the DB
+        # Insert a test node into the DB
         await db.insert("nodes", {
-            "endpoint_url": "http://127.0.0.1:9090",
-            "node_type": "residential",
+            "id": "test-node",
+            "endpoint_url": "https://127.0.0.1:9090",
+            "public_ip": "127.0.0.1",
+            "connectivity_type": "direct",
             "status": "online",
             "health_score": 1.0,
         })
 
         http_client = httpx.AsyncClient()
-        service = RoutingService(http_client, settings, db=db)
+        service = RoutingService(http_client, settings, db)
         result = await service.select_node()
 
         assert result is not None
-        assert result.node_id != "proxyjet-fallback"
-        assert result.endpoint_url == "http://127.0.0.1:9090"
+        assert result.node_id == "test-node"
+        assert result.endpoint_url == "https://127.0.0.1:9090"
 
     @pytest.mark.asyncio
     async def test_falls_back_to_proxyjet_when_no_online_nodes(self, tmp_path):
@@ -155,7 +151,7 @@ class TestSelectNode:
         db = SQLiteClient(db_path)
 
         http_client = httpx.AsyncClient()
-        service = RoutingService(http_client, settings, db=db)
+        service = RoutingService(http_client, settings, db)
         result = await service.select_node()
 
         assert result is not None
@@ -185,7 +181,7 @@ class TestSelectNode:
         })
 
         http_client = httpx.AsyncClient()
-        service = RoutingService(http_client, settings, db=db)
+        service = RoutingService(http_client, settings, db)
         result = await service.select_node()
 
         assert result is not None
@@ -203,7 +199,7 @@ class TestSelectNode:
         db = SQLiteClient(db_path)
 
         http_client = httpx.AsyncClient()
-        service = RoutingService(http_client, settings, db=db)
+        service = RoutingService(http_client, settings, db)
         result = await service.select_node()
 
         assert result is None
@@ -270,7 +266,7 @@ class TestProxyJetFallbackPriority:
         })
 
         http_client = httpx.AsyncClient()
-        service = RoutingService(http_client, settings, db=db)
+        service = RoutingService(http_client, settings, db)
 
         # Select many times – should always pick the residential node
         for _ in range(20):
@@ -299,7 +295,7 @@ class TestProxyJetFallbackPriority:
         })
 
         http_client = httpx.AsyncClient()
-        service = RoutingService(http_client, settings, db=db)
+        service = RoutingService(http_client, settings, db)
         result = await service.select_node()
 
         assert result is not None
@@ -332,7 +328,7 @@ class TestProxyJetFallbackPriority:
         })
 
         http_client = httpx.AsyncClient()
-        service = RoutingService(http_client, settings, db=db)
+        service = RoutingService(http_client, settings, db)
 
         for _ in range(20):
             result = await service.select_node()
@@ -341,31 +337,249 @@ class TestProxyJetFallbackPriority:
             assert result.endpoint_url == "http://10.0.0.2:9090"
 
 
+class TestSelectNodeFiltering:
+    @pytest.mark.asyncio
+    async def test_filter_by_ip_type(self, tmp_path):
+        settings = Settings(
+            USE_SQLITE=True,
+            SQLITE_DB_PATH=str(tmp_path / "test.db"),
+        )
+        http_client = httpx.AsyncClient()
+        service = RoutingService(http_client, settings)
+
+        # Register nodes with different ip_types
+        service.register_cached_node(ProxyNode(
+            node_id="residential-1",
+            endpoint_url="https://10.0.0.1:9090",
+            health_score=1.0,
+            ip_type="residential",
+            ip_region="Seoul, KR",
+        ))
+        service.register_cached_node(ProxyNode(
+            node_id="datacenter-1",
+            endpoint_url="https://10.0.0.2:9090",
+            health_score=1.0,
+            ip_type="datacenter",
+            ip_region="Ashburn, US",
+        ))
+
+        # Request residential
+        result = await service.select_node(ip_type="residential")
+        assert result is not None
+        assert result.node_id == "residential-1"
+        assert result.ip_type == "residential"
+
+        # Request datacenter
+        result = await service.select_node(ip_type="datacenter")
+        assert result is not None
+        assert result.node_id == "datacenter-1"
+        assert result.ip_type == "datacenter"
+
+    @pytest.mark.asyncio
+    async def test_filter_by_ip_region(self, tmp_path):
+        settings = Settings(
+            USE_SQLITE=True,
+            SQLITE_DB_PATH=str(tmp_path / "test.db"),
+        )
+        http_client = httpx.AsyncClient()
+        service = RoutingService(http_client, settings)
+
+        service.register_cached_node(ProxyNode(
+            node_id="kr-node",
+            endpoint_url="https://10.0.0.1:9090",
+            health_score=1.0,
+            ip_type="residential",
+            ip_region="Seoul, KR",
+        ))
+        service.register_cached_node(ProxyNode(
+            node_id="us-node",
+            endpoint_url="https://10.0.0.2:9090",
+            health_score=1.0,
+            ip_type="residential",
+            ip_region="Ashburn, US",
+        ))
+
+        # Request Seoul region (substring match, case-insensitive)
+        result = await service.select_node(ip_region="Seoul")
+        assert result is not None
+        assert result.node_id == "kr-node"
+
+        # Request US region
+        result = await service.select_node(ip_region="US")
+        assert result is not None
+        assert result.node_id == "us-node"
+
+    @pytest.mark.asyncio
+    async def test_filter_by_ip_type_and_region(self, tmp_path):
+        settings = Settings(
+            USE_SQLITE=True,
+            SQLITE_DB_PATH=str(tmp_path / "test.db"),
+        )
+        http_client = httpx.AsyncClient()
+        service = RoutingService(http_client, settings)
+
+        service.register_cached_node(ProxyNode(
+            node_id="kr-residential",
+            endpoint_url="https://10.0.0.1:9090",
+            health_score=1.0,
+            ip_type="residential",
+            ip_region="Seoul, KR",
+        ))
+        service.register_cached_node(ProxyNode(
+            node_id="kr-datacenter",
+            endpoint_url="https://10.0.0.2:9090",
+            health_score=1.0,
+            ip_type="datacenter",
+            ip_region="Seoul, KR",
+        ))
+        service.register_cached_node(ProxyNode(
+            node_id="us-residential",
+            endpoint_url="https://10.0.0.3:9090",
+            health_score=1.0,
+            ip_type="residential",
+            ip_region="Ashburn, US",
+        ))
+
+        result = await service.select_node(ip_type="residential", ip_region="Seoul")
+        assert result is not None
+        assert result.node_id == "kr-residential"
+
+    @pytest.mark.asyncio
+    async def test_fallback_when_no_filter_match(self, tmp_path):
+        """Falls back to any node when no nodes match the filter."""
+        settings = Settings(
+            USE_SQLITE=True,
+            SQLITE_DB_PATH=str(tmp_path / "test.db"),
+        )
+        http_client = httpx.AsyncClient()
+        service = RoutingService(http_client, settings)
+
+        service.register_cached_node(ProxyNode(
+            node_id="only-node",
+            endpoint_url="https://10.0.0.1:9090",
+            health_score=1.0,
+            ip_type="residential",
+            ip_region="Seoul, KR",
+        ))
+
+        # Request a type that doesn't exist — should fall back
+        result = await service.select_node(ip_type="mobile")
+        assert result is not None
+        assert result.node_id == "only-node"
+
+    @pytest.mark.asyncio
+    async def test_case_insensitive_region_filter(self, tmp_path):
+        """Region match should be case-insensitive."""
+        settings = Settings(
+            USE_SQLITE=True,
+            SQLITE_DB_PATH=str(tmp_path / "test.db"),
+        )
+        http_client = httpx.AsyncClient()
+        service = RoutingService(http_client, settings)
+
+        service.register_cached_node(ProxyNode(
+            node_id="kr-node",
+            endpoint_url="https://10.0.0.1:9090",
+            health_score=1.0,
+            ip_type="residential",
+            ip_region="Seoul, KR",
+        ))
+        service.register_cached_node(ProxyNode(
+            node_id="us-node",
+            endpoint_url="https://10.0.0.2:9090",
+            health_score=1.0,
+            ip_type="residential",
+            ip_region="Ashburn, US",
+        ))
+
+        # Lowercase "seoul" should match "Seoul, KR"
+        result = await service.select_node(ip_region="seoul")
+        assert result is not None
+        assert result.node_id == "kr-node"
+
+        # Lowercase "kr" should match "Seoul, KR"
+        result = await service.select_node(ip_region="kr")
+        assert result is not None
+        assert result.node_id == "kr-node"
+
+    @pytest.mark.asyncio
+    async def test_node_with_empty_ip_region_skipped_by_filter(self, tmp_path):
+        """Nodes with empty ip_region don't match region filters."""
+        settings = Settings(
+            USE_SQLITE=True,
+            SQLITE_DB_PATH=str(tmp_path / "test.db"),
+        )
+        http_client = httpx.AsyncClient()
+        service = RoutingService(http_client, settings)
+
+        service.register_cached_node(ProxyNode(
+            node_id="no-region",
+            endpoint_url="https://10.0.0.1:9090",
+            health_score=1.0,
+            ip_type="residential",
+            ip_region="",
+        ))
+        service.register_cached_node(ProxyNode(
+            node_id="kr-node",
+            endpoint_url="https://10.0.0.2:9090",
+            health_score=1.0,
+            ip_type="residential",
+            ip_region="Seoul, KR",
+        ))
+
+        result = await service.select_node(ip_region="Seoul")
+        assert result is not None
+        assert result.node_id == "kr-node"
+
+    @pytest.mark.asyncio
+    async def test_empty_string_filter_treated_as_no_filter(self, tmp_path):
+        """Empty string ip_type/ip_region should not filter (same as None)."""
+        settings = Settings(
+            USE_SQLITE=True,
+            SQLITE_DB_PATH=str(tmp_path / "test.db"),
+        )
+        http_client = httpx.AsyncClient()
+        service = RoutingService(http_client, settings)
+
+        service.register_cached_node(ProxyNode(
+            node_id="node-a",
+            endpoint_url="https://10.0.0.1:9090",
+            health_score=1.0,
+            ip_type="residential",
+            ip_region="Seoul, KR",
+        ))
+
+        # Empty strings should behave like None (no filtering)
+        result = await service.select_node(ip_type="", ip_region="")
+        assert result is not None
+        assert result.node_id == "node-a"
+
+
 class TestReportOutcome:
     @pytest.mark.asyncio
     async def test_records_outcome_sqlite(self, tmp_path):
+        from app.sqlite_db import SQLiteClient
+
         db_path = str(tmp_path / "test.db")
         settings = Settings(
             USE_SQLITE=True,
             SQLITE_DB_PATH=db_path,
-            PROXYJET_HOST="proxy.proxyjet.io",
-            PROXYJET_PORT=1010,
-            PROXYJET_USERNAME="user",
-            PROXYJET_PASSWORD="pass",
         )
         db = SQLiteClient(db_path)
-
-        # Register a node so select_node returns it
+        # Insert a test node into the DB
         await db.insert("nodes", {
-            "endpoint_url": "http://127.0.0.1:9090",
-            "node_type": "residential",
+            "id": "test-node",
+            "endpoint_url": "https://127.0.0.1:9090",
+            "public_ip": "127.0.0.1",
+            "connectivity_type": "direct",
             "status": "online",
             "health_score": 1.0,
         })
 
         http_client = httpx.AsyncClient()
-        service = RoutingService(http_client, settings, db=db)
+        service = RoutingService(http_client, settings, db)
 
+        # First select a node (populates cache)
         node = await service.select_node()
         assert node is not None
 
