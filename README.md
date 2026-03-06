@@ -230,3 +230,46 @@ cd home-node && pytest tests/ -v
 | [Deployment](docs/deployment.md) | Production deployment (Fly.io, macOS launchd, Docker, Supabase) and ProxyJet fallback |
 | [E2E Testing](docs/e2e-testing.md) | Local and staging end-to-end demo scripts |
 | [UPnP / NAT-PMP](docs/upnp.md) | Automatic port forwarding setup for Home Nodes |
+
+## OpenClaw Skill
+
+Space Router includes an [OpenClaw](https://openclaw.ai/) skill that teaches AI agents to route HTTP traffic through the residential proxy network.
+
+### Install the Skill
+
+Copy the skill into your OpenClaw skills directory:
+
+```bash
+# Shared (all agents)
+cp -r skills/space-router ~/.openclaw/skills/space-router
+
+# Or per-workspace
+cp -r skills/space-router <your-workspace>/skills/space-router
+```
+
+### Configure
+
+Set your proxy URL as an environment variable:
+
+```bash
+export SPACE_ROUTER_PROXY_URL="http://sr_live_YOUR_API_KEY@localhost:8080"
+```
+
+Or configure in `~/.openclaw/openclaw.json`:
+
+```json
+{
+  "skills": {
+    "entries": {
+      "space-router": {
+        "enabled": true,
+        "env": {
+          "SPACE_ROUTER_PROXY_URL": "http://sr_live_YOUR_API_KEY@localhost:8080"
+        }
+      }
+    }
+  }
+}
+```
+
+Once configured, the agent will automatically route traffic through residential IPs when scraping, encountering IP-based blocking, or when explicitly asked.
