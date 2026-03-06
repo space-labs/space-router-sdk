@@ -31,7 +31,19 @@ metrics = {
     "upstream_errors": 0,
     "no_nodes": 0,
     "successful_requests": 0,
+    # SOCKS5 metrics (updated by socks5.py)
+    "socks5_total_requests": 0,
+    "socks5_active_connections": 0,
+    "socks5_auth_failures": 0,
+    "socks5_successful_requests": 0,
 }
+
+# Headers that carry routing hints from the client.
+# Extracted before forwarding so they never reach the target server.
+_ROUTING_HINT_HEADERS = frozenset([
+    "x-spacerouter-region",
+    "x-spacerouter-type",
+])
 
 
 def parse_headers(raw: bytes) -> dict[str, str]:
@@ -43,7 +55,9 @@ def parse_headers(raw: bytes) -> dict[str, str]:
     return headers
 
 
-async def _read_request_head(reader: asyncio.StreamReader) -> tuple[bytes, str, str, str, dict[str, str]] | None:
+async def _read_request_head(
+    reader: asyncio.StreamReader,
+) -> tuple[bytes, str, str, str, dict[str, str]] | None:
     try:
         request_line = await asyncio.wait_for(reader.readuntil(b"\r\n"), timeout=30.0)
     except (asyncio.TimeoutError, asyncio.IncompleteReadError, ConnectionResetError):
@@ -55,7 +69,6 @@ async def _read_request_head(reader: asyncio.StreamReader) -> tuple[bytes, str, 
 
     method, target, version = parts
 
-    # Read headers until blank line
     header_data = b""
     try:
         while True:
@@ -125,11 +138,10 @@ async def relay_streams(
 class NodeConnection:
     reader: asyncio.StreamReader
     writer: asyncio.StreamWriter
-    proxy_auth: str | None  # Proxy-Authorization header value, if upstream proxy requires auth
+    proxy_auth: str | None
 
 
 def _extract_proxy_auth(parsed_url) -> str | None:
-    """Extract Proxy-Authorization header from URL credentials (user:pass@host)."""
     if parsed_url.username:
         user = unquote(parsed_url.username)
         passwd = unquote(parsed_url.password or "")
@@ -186,7 +198,6 @@ async def handle_connect(
     node_reader, node_writer = conn.reader, conn.writer
 
     try:
-        # Send CONNECT to home node (or upstream proxy)
         auth_header = f"Proxy-Authorization: {conn.proxy_auth}\r\n" if conn.proxy_auth else ""
         connect_req = (
             f"CONNECT {target_host}:{target_port} HTTP/1.1\r\n"
@@ -198,7 +209,6 @@ async def handle_connect(
         node_writer.write(connect_req)
         await node_writer.drain()
 
-        # Read node response
         try:
             response_line = await asyncio.wait_for(
                 node_reader.readuntil(b"\r\n"), timeout=settings.NODE_REQUEST_TIMEOUT
@@ -206,7 +216,6 @@ async def handle_connect(
         except (asyncio.TimeoutError, asyncio.IncompleteReadError):
             return False, 0, 0, "timeout"
 
-        # Read rest of headers
         while True:
             try:
                 line = await asyncio.wait_for(node_reader.readuntil(b"\r\n"), timeout=5.0)
@@ -219,7 +228,6 @@ async def handle_connect(
         if status_code != 200:
             return False, 0, 0, "node_error"
 
-        # Tell client the tunnel is established
         response = (
             f"HTTP/1.1 200 Connection Established\r\n"
             f"X-SpaceRouter-Node: {node.node_id}\r\n"
@@ -229,11 +237,10 @@ async def handle_connect(
         client_writer.write(response)
         await client_writer.drain()
 
-        # Relay bytes bidirectionally
         bytes_sent, bytes_received = await relay_streams(
             client_reader, client_writer,
             node_reader, node_writer,
-            buffer_size=65536,  # Using default buffer size since settings.BUFFER_SIZE might not exist
+            buffer_size=65536,
         )
 
         return True, bytes_sent, bytes_received, None
@@ -266,14 +273,13 @@ async def handle_http_forward(
     node_reader, node_writer = conn.reader, conn.writer
 
     try:
-        # Build request to forward to home node (or upstream proxy)
-        # Remove client's proxy-specific headers, keep the rest
+        # Strip proxy-specific and routing-hint headers before forwarding
         forward_headers = {
             k: v for k, v in headers.items()
             if k.lower() not in ("proxy-authorization", "proxy-connection")
+            and k.lower() not in _ROUTING_HINT_HEADERS
         }
         forward_headers["X-SpaceRouter-Request-Id"] = request_id
-        # Add upstream proxy auth if the node endpoint has credentials
         if conn.proxy_auth:
             forward_headers["Proxy-Authorization"] = conn.proxy_auth
 
@@ -283,11 +289,10 @@ async def handle_http_forward(
         node_writer.write(request_head)
         await node_writer.drain()
 
-        # Forward request body if present
         content_length = int(headers.get("Content-Length", headers.get("content-length", "0")))
         bytes_sent = len(request_head)
-        buffer_size = 65536  # Using default buffer size
-        
+        buffer_size = 65536
+
         if content_length > 0:
             remaining = content_length
             while remaining > 0:
@@ -299,7 +304,6 @@ async def handle_http_forward(
                 bytes_sent += len(chunk)
                 remaining -= len(chunk)
 
-        # Read response from node
         try:
             response_line = await asyncio.wait_for(
                 node_reader.readuntil(b"\r\n"), timeout=settings.NODE_REQUEST_TIMEOUT
@@ -310,7 +314,6 @@ async def handle_http_forward(
         resp_parts = response_line.decode("latin-1").strip().split(" ", 2)
         status_code = int(resp_parts[1]) if len(resp_parts) >= 2 else 0
 
-        # Read response headers
         resp_header_data = b""
         while True:
             try:
@@ -323,13 +326,11 @@ async def handle_http_forward(
 
         resp_headers = parse_headers(resp_header_data)
 
-        # Inject X-SpaceRouter headers into response
         injected_headers = (
             f"X-SpaceRouter-Node: {node.node_id}\r\n"
             f"X-SpaceRouter-Request-Id: {request_id}\r\n"
         )
 
-        # Write response to client: status line + original headers + injected headers + blank line
         client_writer.write(response_line)
         client_writer.write(resp_header_data)
         client_writer.write(injected_headers.encode())
@@ -338,9 +339,10 @@ async def handle_http_forward(
 
         bytes_received = len(response_line) + len(resp_header_data)
 
-        # Relay response body
         resp_content_length = resp_headers.get("Content-Length", resp_headers.get("content-length"))
-        transfer_encoding = resp_headers.get("Transfer-Encoding", resp_headers.get("transfer-encoding", ""))
+        transfer_encoding = resp_headers.get(
+            "Transfer-Encoding", resp_headers.get("transfer-encoding", "")
+        )
 
         if resp_content_length:
             remaining = int(resp_content_length)
@@ -353,7 +355,6 @@ async def handle_http_forward(
                 bytes_received += len(chunk)
                 remaining -= len(chunk)
         elif "chunked" in transfer_encoding.lower():
-            # Relay chunked encoding as-is
             while True:
                 try:
                     size_line = await asyncio.wait_for(
@@ -367,18 +368,16 @@ async def handle_http_forward(
 
                 chunk_size = int(size_line.strip(), 16)
                 if chunk_size == 0:
-                    # Read trailing CRLF
                     trailer = await node_reader.readuntil(b"\r\n")
                     client_writer.write(trailer)
                     await client_writer.drain()
                     break
 
-                chunk_data = await node_reader.readexactly(chunk_size + 2)  # +2 for CRLF
+                chunk_data = await node_reader.readexactly(chunk_size + 2)
                 client_writer.write(chunk_data)
                 await client_writer.drain()
                 bytes_received += len(chunk_data)
         else:
-            # No content-length or chunked: read until connection closes
             while True:
                 chunk = await node_reader.read(buffer_size)
                 if not chunk:
@@ -441,19 +440,27 @@ class ProxyServer:
 
             raw_head, method, target, version, headers = result
 
+            # --- Extract routing hints before any forwarding ---
+            # These headers are client-supplied and must not reach the target.
+            # Normalise to lowercase for consistent lookup.
+            requested_region = headers.get(
+                "X-SpaceRouter-Region", headers.get("x-spacerouter-region")
+            )
+            requested_type = headers.get(
+                "X-SpaceRouter-Type", headers.get("x-spacerouter-type")
+            )
+
             # --- Authentication ---
-            # Get Proxy-Authorization header - use get() for dictionary access
             auth_header = headers.get("Proxy-Authorization", "")
-            
+
             try:
                 api_key = extract_api_key(auth_header)
-            except Exception as e:
-                logger.error(f"Error extracting API key: {e}")
+            except Exception:
                 metrics["auth_failures"] += 1
                 writer.write(proxy_auth_required(request_id))
                 await writer.drain()
                 return
-            
+
             if not api_key:
                 metrics["auth_failures"] += 1
                 writer.write(proxy_auth_required(request_id))
@@ -478,8 +485,11 @@ class ProxyServer:
                 await writer.drain()
                 return
 
-            # --- Node Selection ---
-            node = await self.node_router.select_node()
+            # --- Node Selection (with routing hints) ---
+            node = await self.node_router.select_node(
+                region=requested_region,
+                node_type=requested_type,
+            )
             if node is None:
                 metrics["no_nodes"] += 1
                 writer.write(no_nodes_available(request_id))
@@ -488,7 +498,6 @@ class ProxyServer:
 
             # --- Route Request ---
             if method.upper() == "CONNECT":
-                # CONNECT host:port
                 host_port = target.split(":")
                 target_host = host_port[0]
                 target_port = int(host_port[1]) if len(host_port) > 1 else 443
@@ -498,8 +507,10 @@ class ProxyServer:
                 )
 
                 if not success:
-                    # Retry with alternate node
-                    alt_node = await self.node_router.select_node()
+                    alt_node = await self.node_router.select_node(
+                        region=requested_region,
+                        node_type=requested_type,
+                    )
                     if alt_node and alt_node.node_id != node.node_id:
                         self.node_router.report_outcome(node.node_id, False, 0, 0)
                         success, bytes_sent, bytes_received, error_type = await handle_connect(
@@ -513,7 +524,9 @@ class ProxyServer:
                         await writer.drain()
 
                 latency_ms = int((time.monotonic() - start_time) * 1000)
-                self.node_router.report_outcome(node.node_id, success, latency_ms, bytes_sent + bytes_received)
+                self.node_router.report_outcome(
+                    node.node_id, success, latency_ms, bytes_sent + bytes_received
+                )
 
                 if success:
                     metrics["successful_requests"] += 1
@@ -534,7 +547,6 @@ class ProxyServer:
                 ))
 
             else:
-                # HTTP forward proxy
                 parsed = urlparse(target)
                 target_host = parsed.hostname or target
 
@@ -543,8 +555,10 @@ class ProxyServer:
                 )
 
                 if not success:
-                    # Retry with alternate node
-                    alt_node = await self.node_router.select_node()
+                    alt_node = await self.node_router.select_node(
+                        region=requested_region,
+                        node_type=requested_type,
+                    )
                     if alt_node and alt_node.node_id != node.node_id:
                         self.node_router.report_outcome(node.node_id, False, 0, 0)
                         success, bytes_sent, bytes_received, status_code, error_type = await handle_http_forward(
@@ -559,11 +573,12 @@ class ProxyServer:
 
                 latency_ms = int((time.monotonic() - start_time) * 1000)
 
-                # Inject latency header only for HTTP forward (CONNECT already sent 200)
                 if success:
                     metrics["successful_requests"] += 1
 
-                self.node_router.report_outcome(node.node_id, success, latency_ms, bytes_sent + bytes_received)
+                self.node_router.report_outcome(
+                    node.node_id, success, latency_ms, bytes_sent + bytes_received
+                )
 
                 self.request_logger.log(RequestLog(
                     request_id=request_id,
@@ -581,7 +596,7 @@ class ProxyServer:
                 ))
 
         except Exception as e:
-            logger.exception(f"Unhandled error in proxy handler: {e}")
+            logger.exception("Unhandled error in proxy handler: %s", e)
         finally:
             metrics["active_connections"] -= 1
             try:

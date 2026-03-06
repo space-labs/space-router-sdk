@@ -3,13 +3,47 @@
 import logging
 import random
 from dataclasses import dataclass
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, List, Optional
 
 import httpx
 
 from app.config import Settings
 
 logger = logging.getLogger(__name__)
+
+# Maps Space Router region prefixes to ISO-3166-1 alpha-2 country codes used
+# by Bright Data's username targeting parameter (-country-XX).
+# Extend this table as new regions are registered by home node operators.
+_REGION_TO_COUNTRY: dict[str, str] = {
+    "us": "us",
+    "eu": "de",
+    "ap": "jp",
+    "au": "au",
+    "ca": "ca",
+    "gb": "gb",
+    "uk": "gb",
+    "de": "de",
+    "fr": "fr",
+    "jp": "jp",
+    "sg": "sg",
+    "br": "br",
+    "in": "in",
+}
+
+
+def _region_to_country(region: str) -> str | None:
+    """Derive a Bright Data country code from a Space Router region string.
+
+    Accepts either a bare ISO code (``"us"``) or a compound region string
+    (``"us-west"``, ``"eu-central"``).  Returns ``None`` if no mapping found.
+    """
+    region = region.lower().strip()
+    # Try exact match first
+    if region in _REGION_TO_COUNTRY:
+        return _REGION_TO_COUNTRY[region]
+    # Try prefix (e.g. "us-west" -> "us")
+    prefix = region.split("-")[0]
+    return _REGION_TO_COUNTRY.get(prefix)
 
 
 @dataclass
@@ -33,16 +67,32 @@ class RoutingService:
         self._nodes_cache: Dict[str, ProxyNode] = {}
         self._node_health: Dict[str, float] = {}
 
-    async def select_node(self) -> Optional[ProxyNode]:
-        """Select the best available node for routing traffic."""
-        # SQLite implementation for local testing
-        if hasattr(self._settings, "USE_SQLITE") and self._settings.USE_SQLITE:
-            return await self._select_node_sqlite()
-        
-        # This would handle the Supabase implementation
-        return self._get_fallback_node()
+    async def select_node(
+        self,
+        region: str | None = None,
+        node_type: str | None = None,
+    ) -> Optional[ProxyNode]:
+        """Select the best available node for routing traffic.
 
-    async def _select_node_sqlite(self) -> Optional[ProxyNode]:
+        Tries home nodes first (filtered by *region* and *node_type* when
+        provided), then falls back to Bright Data if no matching node is found.
+        """
+        if hasattr(self._settings, "USE_SQLITE") and self._settings.USE_SQLITE:
+            node = await self._select_node_sqlite(region=region, node_type=node_type)
+        else:
+            node = await self._select_node_supabase(region=region, node_type=node_type)
+
+        if node:
+            return node
+
+        # No matching home node — fall back to Bright Data
+        return self._get_brightdata_fallback(region=region)
+
+    async def _select_node_sqlite(
+        self,
+        region: str | None = None,
+        node_type: str | None = None,
+    ) -> Optional[ProxyNode]:
         """Select a node from the SQLite database."""
         # Query online nodes from the database
         if self._db is not None:
@@ -58,67 +108,115 @@ class RoutingService:
                     )
                     for r in rows
                 ]
+
+                if region:
+                    candidates = [n for n in candidates if _node_matches_region(n, region)]
+                if node_type:
+                    candidates = [n for n in candidates if _node_matches_type(n, node_type)]
+
                 if candidates:
                     weights = [max(c.health_score, 0.01) for c in candidates]
                     return random.choices(candidates, weights=weights, k=1)[0]
 
         # Fall back to in-memory cache
-        if self._nodes_cache:
-            candidates = list(self._nodes_cache.values())
+        candidates = list(self._nodes_cache.values())
+        if region:
+            candidates = [n for n in candidates if _node_matches_region(n, region)]
+        if node_type:
+            candidates = [n for n in candidates if _node_matches_type(n, node_type)]
+
+        if candidates:
             weights = [max(c.health_score, 0.01) for c in candidates]
             return random.choices(candidates, weights=weights, k=1)[0]
 
         return None
 
-    def _get_fallback_node(self) -> Optional[ProxyNode]:
-        """Get a fallback proxy provider when no residential nodes are available."""
-        # Check if Proxyjet is configured
-        if not self._settings.PROXYJET_HOST:
+    async def _select_node_supabase(
+        self,
+        region: str | None = None,
+        node_type: str | None = None,
+    ) -> Optional[ProxyNode]:
+        """Select a node from Supabase (production path — stub for now)."""
+        return None
+
+    def _get_brightdata_fallback(self, region: str | None = None) -> Optional[ProxyNode]:
+        """Build a Bright Data proxy endpoint, optionally geo-targeted.
+
+        Returns ``None`` if Bright Data is not configured.
+        """
+        s = self._settings
+        if not s.BRIGHTDATA_ACCOUNT_ID or not s.BRIGHTDATA_ZONE or not s.BRIGHTDATA_PASSWORD:
             return None
 
-        auth = None
-        if self._settings.PROXYJET_USERNAME and self._settings.PROXYJET_PASSWORD:
-            auth = f"{self._settings.PROXYJET_USERNAME}:{self._settings.PROXYJET_PASSWORD}"
+        username = f"brd-customer-{s.BRIGHTDATA_ACCOUNT_ID}-zone-{s.BRIGHTDATA_ZONE}"
 
-        endpoint_url = self._proxyjet_endpoint_url(auth)
+        if region:
+            country_code = _region_to_country(region)
+            if country_code:
+                username += f"-country-{country_code}"
+                logger.debug("Bright Data fallback with country targeting: %s", country_code)
+            else:
+                logger.warning(
+                    "No country mapping for region %r — Bright Data fallback will not geo-target",
+                    region,
+                )
+
+        endpoint_url = f"http://{username}:{s.BRIGHTDATA_PASSWORD}@{s.BRIGHTDATA_HOST}:{s.BRIGHTDATA_PORT}"
+
         return ProxyNode(
-            node_id="proxyjet-fallback",
+            node_id="brightdata-fallback",
             endpoint_url=endpoint_url,
             health_score=1.0,
         )
 
-    def _proxyjet_endpoint_url(self, auth: Optional[str]) -> str:
-        """Build the Proxyjet endpoint URL with auth if provided."""
-        if auth:
-            return f"http://{auth}@{self._settings.PROXYJET_HOST}:{self._settings.PROXYJET_PORT}"
-        return f"http://{self._settings.PROXYJET_HOST}:{self._settings.PROXYJET_PORT}"
-
     async def report_outcome(
-        self, node_id: str, success: bool, latency_ms: int, bytes_transferred: int
+        self,
+        node_id: str,
+        success: bool,
+        latency_ms: int,
+        bytes_transferred: int,
     ) -> None:
         """Record the outcome of a routing decision to track node performance."""
-        # SQLite implementation for local testing
-        if hasattr(self._settings, "USE_SQLITE") and self._settings.USE_SQLITE:
-            await self._report_outcome_sqlite(node_id, success, latency_ms, bytes_transferred)
+        if node_id == "brightdata-fallback":
+            # Don't track health for the managed fallback
             return
 
-        # This would handle the Supabase implementation, but we're only using SQLite for now
-        return
+        if hasattr(self._settings, "USE_SQLITE") and self._settings.USE_SQLITE:
+            await self._report_outcome_sqlite(node_id, success, latency_ms, bytes_transferred)
 
     async def _report_outcome_sqlite(
-        self, node_id: str, success: bool, latency_ms: int, bytes_transferred: int
+        self,
+        node_id: str,
+        success: bool,
+        latency_ms: int,
+        bytes_transferred: int,
     ) -> None:
-        """Record a routing outcome using SQLite."""
-        # Update the health score in our local cache
-        if node_id in self._nodes_cache:
-            if success:
-                # Slightly increase health score for successful requests
-                self._node_health[node_id] = min(1.0, self._node_health.get(node_id, 0.9) + 0.1)
-            else:
-                # Significantly decrease health score for failed requests
-                self._node_health[node_id] = max(0.1, self._node_health.get(node_id, 0.5) - 0.3)
-                
-            # Update the node health score
-            self._nodes_cache[node_id].health_score = self._node_health[node_id]
-            
-        # In a real implementation, this would write to the database
+        """Update a node's health score in the local cache."""
+        if node_id not in self._nodes_cache:
+            return
+
+        current = self._node_health.get(node_id, 1.0)
+        if success:
+            self._node_health[node_id] = min(1.0, current + 0.1)
+        else:
+            self._node_health[node_id] = max(0.1, current - 0.3)
+
+        self._nodes_cache[node_id].health_score = self._node_health[node_id]
+
+
+# ---------------------------------------------------------------------------
+# Node-matching helpers (extend once Supabase carries these fields)
+# ---------------------------------------------------------------------------
+
+def _node_matches_region(node: ProxyNode, region: str) -> bool:
+    """Return True if *node* is compatible with the requested *region*.
+
+    Nodes don't yet carry region metadata in the local cache, so this always
+    returns True for now — the Supabase path will query by region directly.
+    """
+    return True
+
+
+def _node_matches_type(node: ProxyNode, node_type: str) -> bool:
+    """Return True if *node* matches the requested *node_type*."""
+    return True

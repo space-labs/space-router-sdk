@@ -30,6 +30,7 @@ class SQLiteClient:
             key_prefix TEXT NOT NULL,
             rate_limit_rpm INTEGER NOT NULL DEFAULT 60,
             is_active INTEGER NOT NULL DEFAULT 1,
+            created_by_ip TEXT,
             created_at TEXT NOT NULL
         )
         ''')
@@ -39,11 +40,15 @@ class SQLiteClient:
         CREATE TABLE IF NOT EXISTS nodes (
             id TEXT PRIMARY KEY,
             endpoint_url TEXT NOT NULL,
+            public_ip TEXT,
+            connectivity_type TEXT NOT NULL DEFAULT 'direct',
             node_type TEXT NOT NULL DEFAULT 'residential',
             status TEXT NOT NULL DEFAULT 'online',
             health_score REAL NOT NULL DEFAULT 1.0,
             region TEXT,
             label TEXT,
+            ip_type TEXT,
+            ip_region TEXT,
             created_at TEXT NOT NULL,
             updated_at TEXT NOT NULL
         )
@@ -126,12 +131,27 @@ class SQLiteClient:
             # Build WHERE clause from remaining parameters
             conditions = []
             for key, value in params.items():
-                # Handle PostgreSQL-style operators (eq, gt, lt)
+                # Handle PostgreSQL-style operators (eq, gte, gt, lte, lt)
                 if key.startswith("id.eq") or key.startswith("id:eq"):
                     # Remove the 'eq.' prefix for comparison
                     clean_value = value.replace("eq.", "")
                     conditions.append("id = ?")
                     values.append(clean_value)
+                elif value.startswith("gte."):
+                    conditions.append(f"{key} >= ?")
+                    values.append(value[4:])
+                elif value.startswith("gt."):
+                    conditions.append(f"{key} > ?")
+                    values.append(value[3:])
+                elif value.startswith("lte."):
+                    conditions.append(f"{key} <= ?")
+                    values.append(value[4:])
+                elif value.startswith("lt."):
+                    conditions.append(f"{key} < ?")
+                    values.append(value[3:])
+                elif value.startswith("eq."):
+                    conditions.append(f"{key} = ?")
+                    values.append(value[3:])
                 elif 'eq.' in value:
                     # Handle cases like {"id": "eq.123"}
                     clean_value = value.replace("eq.", "")

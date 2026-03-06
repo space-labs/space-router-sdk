@@ -8,6 +8,8 @@ primary_region = "iad"
   SR_PROXY_PORT = "8080"
   SR_MANAGEMENT_PORT = "8081"
   SR_LOG_LEVEL = "INFO"
+  SR_COORDINATION_API_URL = "https://spacerouter-coordination-api.fly.dev"
+  SR_USE_SQLITE = "false"
   SR_DEFAULT_RATE_LIMIT_RPM = "60"
 
 [[services]]
@@ -16,12 +18,35 @@ primary_region = "iad"
 
   [[services.ports]]
     port = 8080
-    handlers = []
+    handlers = ["tls"]
 
   [services.concurrency]
     type = "connections"
     hard_limit = 500
     soft_limit = 400
+
+  [[services.tcp_checks]]
+    interval = 10000
+    timeout = 2000
+    grace_period = "5s"
+
+[[services]]
+  internal_port = 1080
+  protocol = "tcp"
+
+  [[services.ports]]
+    port = 1080
+    handlers = ["tls"]
+
+  [services.concurrency]
+    type = "connections"
+    hard_limit = 500
+    soft_limit = 400
+
+  [[services.tcp_checks]]
+    interval = 10000
+    timeout = 2000
+    grace_period = "5s"
 
 [[services]]
   internal_port = 8081

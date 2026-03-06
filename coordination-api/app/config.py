@@ -10,7 +10,7 @@ class Settings(BaseSettings):
 
     PORT: int = 8000
     LOG_LEVEL: str = "INFO"
-    
+
     # SQLite config (local testing)
     USE_SQLITE: bool = True
     SQLITE_DB_PATH: str = "space_router.db"
@@ -22,11 +22,17 @@ class Settings(BaseSettings):
     # Internal API authentication
     INTERNAL_API_SECRET: str = ""
 
-    # Proxyjet fallback proxy (used when no residential nodes available)
-    PROXYJET_HOST: str = ""
-    PROXYJET_PORT: int = 8080
-    PROXYJET_USERNAME: str = ""
-    PROXYJET_PASSWORD: str = ""
+    # ipinfo.io token for IP classification (optional — free tier works without)
+    IPINFO_TOKEN: str = ""
+
+    # Bright Data fallback proxy
+    # Endpoint: brd.superproxy.io:33335
+    # Username format: brd-customer-{ACCOUNT_ID}-zone-{ZONE}[-country-{CC}]
+    BRIGHTDATA_ACCOUNT_ID: str = ""
+    BRIGHTDATA_ZONE: str = ""
+    BRIGHTDATA_PASSWORD: str = ""
+    BRIGHTDATA_HOST: str = "brd.superproxy.io"
+    BRIGHTDATA_PORT: int = 33335
 
     class Config:
         env_prefix = "SR_"
