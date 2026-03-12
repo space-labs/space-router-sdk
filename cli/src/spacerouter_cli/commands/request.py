@@ -19,8 +19,7 @@ app = typer.Typer(no_args_is_help=True)
 ApiKeyOpt = Annotated[Optional[str], typer.Option("--api-key", help="API key for proxy auth.")]
 GatewayOpt = Annotated[Optional[str], typer.Option("--gateway-url", help="Proxy gateway URL.")]
 HeaderOpt = Annotated[Optional[list[str]], typer.Option("--header", "-H", help="Custom header (Name: Value). Repeatable.")]
-IpTypeOpt = Annotated[Optional[str], typer.Option("--ip-type", help="IP type filter: residential, mobile, datacenter, business.")]
-RegionOpt = Annotated[Optional[str], typer.Option("--region", help="Region filter substring.")]
+RegionOpt = Annotated[Optional[str], typer.Option("--region", help="2-letter country code (e.g. US, KR).")]
 TimeoutOpt = Annotated[Optional[float], typer.Option("--timeout", help="Request timeout in seconds.")]
 OutputOpt = Annotated[str, typer.Option("--output", help="Output mode: json (structured) or raw (body only).")]
 FollowOpt = Annotated[bool, typer.Option("--follow-redirects", help="Follow HTTP redirects.")]
@@ -53,7 +52,6 @@ def _do_request(
     api_key: str | None,
     gateway_url: str | None,
     header: list[str] | None,
-    ip_type: str | None,
     region: str | None,
     timeout: float | None,
     output: str,
@@ -78,7 +76,6 @@ def _do_request(
     with SpaceRouter(
         cfg.api_key,
         gateway_url=cfg.gateway_url,
-        ip_type=ip_type,
         region=region,
         timeout=cfg.timeout,
         coordination_url=cfg.coordination_api_url,
@@ -110,7 +107,6 @@ def get(
     api_key: ApiKeyOpt = None,
     gateway_url: GatewayOpt = None,
     header: HeaderOpt = None,
-    ip_type: IpTypeOpt = None,
     region: RegionOpt = None,
     timeout: TimeoutOpt = None,
     output: OutputOpt = "json",
@@ -118,7 +114,7 @@ def get(
 ) -> None:
     """Send a GET request through the residential proxy."""
     _do_request("GET", url, api_key=api_key, gateway_url=gateway_url, header=header,
-                ip_type=ip_type, region=region, timeout=timeout, output=output,
+                region=region, timeout=timeout, output=output,
                 follow_redirects=follow_redirects)
 
 
@@ -130,7 +126,6 @@ def post(
     gateway_url: GatewayOpt = None,
     header: HeaderOpt = None,
     data: DataOpt = None,
-    ip_type: IpTypeOpt = None,
     region: RegionOpt = None,
     timeout: TimeoutOpt = None,
     output: OutputOpt = "json",
@@ -138,7 +133,7 @@ def post(
 ) -> None:
     """Send a POST request through the residential proxy."""
     _do_request("POST", url, api_key=api_key, gateway_url=gateway_url, header=header,
-                ip_type=ip_type, region=region, timeout=timeout, output=output,
+                region=region, timeout=timeout, output=output,
                 follow_redirects=follow_redirects, data=data)
 
 
@@ -150,7 +145,6 @@ def put(
     gateway_url: GatewayOpt = None,
     header: HeaderOpt = None,
     data: DataOpt = None,
-    ip_type: IpTypeOpt = None,
     region: RegionOpt = None,
     timeout: TimeoutOpt = None,
     output: OutputOpt = "json",
@@ -158,7 +152,7 @@ def put(
 ) -> None:
     """Send a PUT request through the residential proxy."""
     _do_request("PUT", url, api_key=api_key, gateway_url=gateway_url, header=header,
-                ip_type=ip_type, region=region, timeout=timeout, output=output,
+                region=region, timeout=timeout, output=output,
                 follow_redirects=follow_redirects, data=data)
 
 
@@ -170,7 +164,6 @@ def patch(
     gateway_url: GatewayOpt = None,
     header: HeaderOpt = None,
     data: DataOpt = None,
-    ip_type: IpTypeOpt = None,
     region: RegionOpt = None,
     timeout: TimeoutOpt = None,
     output: OutputOpt = "json",
@@ -178,7 +171,7 @@ def patch(
 ) -> None:
     """Send a PATCH request through the residential proxy."""
     _do_request("PATCH", url, api_key=api_key, gateway_url=gateway_url, header=header,
-                ip_type=ip_type, region=region, timeout=timeout, output=output,
+                region=region, timeout=timeout, output=output,
                 follow_redirects=follow_redirects, data=data)
 
 
@@ -189,7 +182,6 @@ def delete(
     api_key: ApiKeyOpt = None,
     gateway_url: GatewayOpt = None,
     header: HeaderOpt = None,
-    ip_type: IpTypeOpt = None,
     region: RegionOpt = None,
     timeout: TimeoutOpt = None,
     output: OutputOpt = "json",
@@ -197,7 +189,7 @@ def delete(
 ) -> None:
     """Send a DELETE request through the residential proxy."""
     _do_request("DELETE", url, api_key=api_key, gateway_url=gateway_url, header=header,
-                ip_type=ip_type, region=region, timeout=timeout, output=output,
+                region=region, timeout=timeout, output=output,
                 follow_redirects=follow_redirects)
 
 
@@ -208,7 +200,6 @@ def head(
     api_key: ApiKeyOpt = None,
     gateway_url: GatewayOpt = None,
     header: HeaderOpt = None,
-    ip_type: IpTypeOpt = None,
     region: RegionOpt = None,
     timeout: TimeoutOpt = None,
     output: OutputOpt = "json",
@@ -216,5 +207,5 @@ def head(
 ) -> None:
     """Send a HEAD request through the residential proxy."""
     _do_request("HEAD", url, api_key=api_key, gateway_url=gateway_url, header=header,
-                ip_type=ip_type, region=region, timeout=timeout, output=output,
+                region=region, timeout=timeout, output=output,
                 follow_redirects=follow_redirects)

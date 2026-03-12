@@ -13,12 +13,22 @@ import {
   RateLimitError,
   UpstreamError,
 } from "./errors.js";
-import type { IpType, SpaceRouterOptions } from "./models.js";
+import type { SpaceRouterOptions } from "./models.js";
 import { ProxyResponse } from "./models.js";
 
 const DEFAULT_HTTP_GATEWAY = "https://gateway.spacerouter.org:8080";
 const DEFAULT_COORDINATION_URL = "https://coordination.spacerouter.org";
 const DEFAULT_TIMEOUT = 30_000;
+const REGION_RE = /^[A-Z]{2}$/;
+
+/** Throw if region is not a 2-letter country code. */
+function validateRegion(region: string): void {
+  if (!REGION_RE.test(region)) {
+    throw new Error(
+      `region must be a 2-letter country code (ISO 3166-1 alpha-2), got "${region}"`,
+    );
+  }
+}
 
 /** Options passed through to individual requests. */
 export interface RequestOptions {
@@ -164,7 +174,6 @@ export class SpaceRouter {
   private readonly _apiKey: string;
   private readonly _gatewayUrl: string;
   private readonly _protocol: "http" | "socks5";
-  private readonly _ipType: IpType | undefined;
   private readonly _region: string | undefined;
   private readonly _timeout: number;
   private readonly _coordinationUrl: string;
@@ -178,8 +187,8 @@ export class SpaceRouter {
     this._apiKey = apiKey;
     this._gatewayUrl = options?.gatewayUrl ?? DEFAULT_HTTP_GATEWAY;
     this._protocol = options?.protocol ?? "http";
-    this._ipType = options?.ipType;
     this._region = options?.region;
+    if (this._region) validateRegion(this._region);
     this._timeout = options?.timeout ?? DEFAULT_TIMEOUT;
     this._coordinationUrl =
       options?.coordinationUrl ?? DEFAULT_COORDINATION_URL;
@@ -229,9 +238,6 @@ export class SpaceRouter {
     const agent = await this._ensureAgent();
     const headers: Record<string, string> = { ...options?.headers };
 
-    if (this._ipType) {
-      headers["X-SpaceRouter-IP-Type"] = this._ipType;
-    }
     if (this._region) {
       headers["X-SpaceRouter-Region"] = this._region;
     }
@@ -285,13 +291,11 @@ export class SpaceRouter {
 
   /** Return a new client with different routing preferences. */
   withRouting(options: {
-    ipType?: IpType;
     region?: string;
   }): SpaceRouter {
     return new SpaceRouter(this._apiKey, {
       gatewayUrl: this._gatewayUrl,
       protocol: this._protocol,
-      ipType: options.ipType,
       region: options.region,
       timeout: this._timeout,
       coordinationUrl: this._coordinationUrl,

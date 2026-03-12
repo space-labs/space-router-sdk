@@ -278,16 +278,27 @@ describe("SpaceRouter", () => {
 
   it("withRouting returns new client", () => {
     const client = new SpaceRouter("sr_live_test", { caCert: null });
-    const routed = client.withRouting({ ipType: "mobile", region: "KR" });
+    const routed = client.withRouting({ region: "KR" });
     expect(routed).not.toBe(client);
     expect(routed.toString()).toContain("protocol=http");
     client.close();
     routed.close();
   });
 
+  it("rejects invalid region", () => {
+    expect(() => new SpaceRouter("sr_live_test", { region: "Seoul, KR" })).toThrow(
+      "2-letter country code",
+    );
+    expect(() => new SpaceRouter("sr_live_test", { region: "USA" })).toThrow(
+      "2-letter country code",
+    );
+    expect(() => new SpaceRouter("sr_live_test", { region: "us" })).toThrow(
+      "2-letter country code",
+    );
+  });
+
   it("injects routing headers", async () => {
     const client = new SpaceRouter("sr_live_test", {
-      ipType: "residential",
       region: "US",
       caCert: null,
     });
@@ -297,7 +308,6 @@ describe("SpaceRouter", () => {
     expect(fetchSpy).toHaveBeenCalledOnce();
     const callArgs = fetchSpy.mock.calls[0];
     const headers = callArgs[1].headers;
-    expect(headers["X-SpaceRouter-IP-Type"]).toBe("residential");
     expect(headers["X-SpaceRouter-Region"]).toBe("US");
     client.close();
   });
@@ -307,7 +317,6 @@ describe("SpaceRouter", () => {
     await client.get("http://example.com");
 
     const headers = fetchSpy.mock.calls[0][1].headers;
-    expect(headers["X-SpaceRouter-IP-Type"]).toBeUndefined();
     expect(headers["X-SpaceRouter-Region"]).toBeUndefined();
     client.close();
   });

@@ -20,8 +20,6 @@ from spacerouter.exceptions import (
 )
 from spacerouter.models import ProxyResponse
 
-IpType = Literal["residential", "mobile", "datacenter", "business"]
-
 _DEFAULT_HTTP_GATEWAY = "https://gateway.spacerouter.org:8080"
 _DEFAULT_SOCKS5_GATEWAY = "socks5://gateway.spacerouter.org:1080"
 _DEFAULT_COORDINATION_URL = "https://coordination.spacerouter.org"
@@ -59,12 +57,21 @@ def _build_ssl_context(ca_pem: str) -> ssl.SSLContext:
 # Sentinel distinguishing "not provided" from an explicit ``None``.
 _UNSET: Any = type("_Unset", (), {"__repr__": lambda self: "<UNSET>"})()
 
+_REGION_RE = __import__("re").compile(r"^[A-Z]{2}$")
+
+
+def _validate_region(region: str) -> None:
+    """Raise ``ValueError`` if *region* is not a 2-letter country code."""
+    if not _REGION_RE.match(region):
+        raise ValueError(
+            f"region must be a 2-letter country code (ISO 3166-1 alpha-2), got {region!r}"
+        )
+
 
 def _build_proxy(
     api_key: str,
     gateway_url: str,
     protocol: str,
-    ip_type: str | None,
     region: str | None,
 ) -> httpx.Proxy | str:
     """Build an httpx-compatible proxy specification with embedded credentials."""
@@ -83,9 +90,8 @@ def _build_proxy(
     # request) so the gateway can read them for node selection.  httpx.Proxy
     # accepts a ``headers`` dict that is sent with every proxy negotiation.
     proxy_headers: dict[str, str] = {}
-    if ip_type:
-        proxy_headers["X-SpaceRouter-IP-Type"] = ip_type
     if region:
+        _validate_region(region)
         proxy_headers["X-SpaceRouter-Region"] = region
 
     if proxy_headers:
@@ -156,7 +162,6 @@ class SpaceRouter:
         *,
         gateway_url: str = _DEFAULT_HTTP_GATEWAY,
         protocol: Literal["http", "socks5"] = "http",
-        ip_type: IpType | None = None,
         region: str | None = None,
         timeout: float = 30.0,
         coordination_url: str = _DEFAULT_COORDINATION_URL,
@@ -166,7 +171,6 @@ class SpaceRouter:
         self._api_key = api_key
         self._gateway_url = gateway_url
         self._protocol = protocol
-        self._ip_type = ip_type
         self._region = region
         self._timeout = timeout
         self._coordination_url = coordination_url
@@ -184,7 +188,7 @@ class SpaceRouter:
         else:
             self._ca_cert = ca_cert if ca_cert is not _UNSET else None
 
-        proxy = _build_proxy(api_key, gateway_url, protocol, ip_type, region)
+        proxy = _build_proxy(api_key, gateway_url, protocol, region)
         self._client = httpx.Client(
             proxy=proxy, timeout=timeout, verify=verify, **httpx_kwargs,
         )
@@ -220,7 +224,6 @@ class SpaceRouter:
     def with_routing(
         self,
         *,
-        ip_type: IpType | None = None,
         region: str | None = None,
     ) -> SpaceRouter:
         """Return a new client with different routing preferences."""
@@ -228,7 +231,6 @@ class SpaceRouter:
             self._api_key,
             gateway_url=self._gateway_url,
             protocol=self._protocol,
-            ip_type=ip_type,
             region=region,
             timeout=self._timeout,
             coordination_url=self._coordination_url,
@@ -274,7 +276,6 @@ class AsyncSpaceRouter:
         *,
         gateway_url: str = _DEFAULT_HTTP_GATEWAY,
         protocol: Literal["http", "socks5"] = "http",
-        ip_type: IpType | None = None,
         region: str | None = None,
         timeout: float = 30.0,
         coordination_url: str = _DEFAULT_COORDINATION_URL,
@@ -284,7 +285,6 @@ class AsyncSpaceRouter:
         self._api_key = api_key
         self._gateway_url = gateway_url
         self._protocol = protocol
-        self._ip_type = ip_type
         self._region = region
         self._timeout = timeout
         self._coordination_url = coordination_url
@@ -301,7 +301,7 @@ class AsyncSpaceRouter:
         else:
             self._ca_cert = ca_cert if ca_cert is not _UNSET else None
 
-        proxy = _build_proxy(api_key, gateway_url, protocol, ip_type, region)
+        proxy = _build_proxy(api_key, gateway_url, protocol, region)
         self._client = httpx.AsyncClient(
             proxy=proxy, timeout=timeout, verify=verify, **httpx_kwargs,
         )
@@ -337,7 +337,6 @@ class AsyncSpaceRouter:
     def with_routing(
         self,
         *,
-        ip_type: IpType | None = None,
         region: str | None = None,
     ) -> AsyncSpaceRouter:
         """Return a new client with different routing preferences."""
@@ -345,7 +344,6 @@ class AsyncSpaceRouter:
             self._api_key,
             gateway_url=self._gateway_url,
             protocol=self._protocol,
-            ip_type=ip_type,
             region=region,
             timeout=self._timeout,
             coordination_url=self._coordination_url,

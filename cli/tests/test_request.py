@@ -168,9 +168,9 @@ class TestPost:
         assert "JSON" in data["message"]
 
 
-class TestIpTypeAndRegion:
+class TestRegion:
     @patch("spacerouter_cli.commands.request.SpaceRouter")
-    def test_passes_ip_type_and_region(self, mock_sr_cls, runner, cli_env):
+    def test_passes_region(self, mock_sr_cls, runner, cli_env):
         mock_client = MagicMock()
         mock_client.__enter__ = MagicMock(return_value=mock_client)
         mock_client.__exit__ = MagicMock(return_value=False)
@@ -179,11 +179,9 @@ class TestIpTypeAndRegion:
 
         result = runner.invoke(app, [
             "request", "get", "http://example.com",
-            "--ip-type", "residential",
             "--region", "US",
         ])
         assert result.exit_code == 0
         mock_sr_cls.assert_called_once()
         call_kwargs = mock_sr_cls.call_args
-        assert call_kwargs[1]["ip_type"] == "residential"
         assert call_kwargs[1]["region"] == "US"

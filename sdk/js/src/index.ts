@@ -17,7 +17,6 @@ export { ProxyResponse } from "./models.js";
 export type {
   ApiKey,
   ApiKeyInfo,
-  IpType,
   SpaceRouterOptions,
   SpaceRouterAdminOptions,
 } from "./models.js";

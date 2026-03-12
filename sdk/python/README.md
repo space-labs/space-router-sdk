@@ -33,22 +33,20 @@ async with AsyncSpaceRouter("sr_live_YOUR_API_KEY") as client:
     print(response.json())
 ```
 
-## IP Targeting
+## Region Targeting
 
-Route requests through specific IP types or geographic regions:
+Route requests through specific geographic regions:
 
 ```python
 # Target residential IPs in the US
-client = SpaceRouter("sr_live_xxx", ip_type="residential", region="US")
+client = SpaceRouter("sr_live_xxx", region="US")
 
-# Target mobile IPs in South Korea
-client = SpaceRouter("sr_live_xxx", ip_type="mobile", region="Seoul, KR")
+# Target residential IPs in South Korea
+client = SpaceRouter("sr_live_xxx", region="KR")
 
 # Change routing on the fly
-mobile_client = client.with_routing(ip_type="mobile", region="JP")
+jp_client = client.with_routing(region="JP")
 ```
-
-Available IP types: `residential`, `mobile`, `datacenter`, `business`
 
 ## SOCKS5 Proxy
 
@@ -116,6 +114,5 @@ Note: HTTP errors from the target website (e.g. 404, 500) are **not** raised as 
 | `api_key` | (required) | API key (`sr_live_...`) |
 | `gateway_url` | `http://localhost:8080` | Proxy gateway URL |
 | `protocol` | `http` | `http` or `socks5` |
-| `ip_type` | `None` | IP type filter |
-| `region` | `None` | Region filter (substring match) |
+| `region` | `None` | 2-letter country code (ISO 3166-1 alpha-2) |
 | `timeout` | `30.0` | Request timeout in seconds |

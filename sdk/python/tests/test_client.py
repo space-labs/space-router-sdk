@@ -12,7 +12,7 @@ from spacerouter import (
     SpaceRouter,
     fetch_ca_cert,
 )
-from spacerouter.client import _build_proxy, _build_ssl_context, _check_proxy_errors
+from spacerouter.client import _build_proxy, _build_ssl_context, _check_proxy_errors, _validate_region
 from spacerouter.exceptions import (
     AuthenticationError,
     NoNodesAvailableError,
@@ -29,27 +29,46 @@ from spacerouter.models import ProxyResponse
 
 class TestBuildProxy:
     def test_http_default(self):
-        result = _build_proxy("sr_live_abc", "http://gw:8080", "http", None, None)
+        result = _build_proxy("sr_live_abc", "http://gw:8080", "http", None)
         assert result == "http://sr_live_abc:@gw:8080"
 
     def test_socks5(self):
-        result = _build_proxy("sr_live_abc", "socks5://gw:1080", "socks5", None, None)
+        result = _build_proxy("sr_live_abc", "socks5://gw:1080", "socks5", None)
         assert result == "socks5://sr_live_abc:@gw:1080"
 
     def test_default_ports(self):
-        result = _build_proxy("key", "http://gw", "http", None, None)
+        result = _build_proxy("key", "http://gw", "http", None)
         assert result == "http://key:@gw:8080"
 
-        result = _build_proxy("key", "socks5://gw", "socks5", None, None)
+        result = _build_proxy("key", "socks5://gw", "socks5", None)
         assert result == "socks5://key:@gw:1080"
 
     def test_with_routing_headers(self):
-        result = _build_proxy("key", "http://gw:8080", "http", "residential", "US")
+        result = _build_proxy("key", "http://gw:8080", "http", "US")
         assert isinstance(result, httpx.Proxy)
 
     def test_without_routing_returns_string(self):
-        result = _build_proxy("key", "http://gw:8080", "http", None, None)
+        result = _build_proxy("key", "http://gw:8080", "http", None)
         assert isinstance(result, str)
+
+    def test_rejects_invalid_region(self):
+        with pytest.raises(ValueError, match="2-letter country code"):
+            _build_proxy("key", "http://gw:8080", "http", "Seoul, KR")
+        with pytest.raises(ValueError, match="2-letter country code"):
+            _build_proxy("key", "http://gw:8080", "http", "USA")
+        with pytest.raises(ValueError, match="2-letter country code"):
+            _build_proxy("key", "http://gw:8080", "http", "u")
+
+
+class TestValidateRegion:
+    def test_valid_codes(self):
+        for code in ("US", "KR", "JP", "DE", "BR"):
+            _validate_region(code)  # should not raise
+
+    @pytest.mark.parametrize("bad", ["Seoul, KR", "USA", "u", "us", "123", ""])
+    def test_invalid_codes(self, bad):
+        with pytest.raises(ValueError, match="2-letter country code"):
+            _validate_region(bad)
 
 
 # ---------------------------------------------------------------------------
@@ -199,9 +218,8 @@ class TestSpaceRouter:
 
     def test_with_routing_returns_new_client(self):
         client = SpaceRouter("sr_live_test")
-        routed = client.with_routing(ip_type="mobile", region="KR")
+        routed = client.with_routing(region="KR")
         assert routed is not client
-        assert routed._ip_type == "mobile"
         assert routed._region == "KR"
         client.close()
         routed.close()
@@ -340,7 +358,7 @@ class TestCaCertIntegration:
         """with_routing should pass through the cached cert, not re-fetch."""
         with patch("spacerouter.client.fetch_ca_cert") as mock:
             client = SpaceRouter("sr_live_test", ca_cert=None)
-            routed = client.with_routing(ip_type="mobile")
+            routed = client.with_routing(region="KR")
             mock.assert_not_called()
             assert routed._ca_cert is None
             client.close()

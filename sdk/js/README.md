@@ -25,28 +25,24 @@ console.log(response.requestId);    // unique request ID for tracing
 client.close();
 ```
 
-## IP Targeting
+## Region Targeting
 
-Route requests through specific IP types or geographic regions:
+Route requests through specific geographic regions:
 
 ```ts
 // Target residential IPs in the US
 const client = new SpaceRouter("sr_live_xxx", {
-  ipType: "residential",
   region: "US",
 });
 
-// Target mobile IPs in South Korea
-const mobile = new SpaceRouter("sr_live_xxx", {
-  ipType: "mobile",
-  region: "Seoul, KR",
+// Target residential IPs in South Korea
+const krClient = new SpaceRouter("sr_live_xxx", {
+  region: "KR",
 });
 
 // Change routing on the fly
-const jpClient = client.withRouting({ ipType: "mobile", region: "JP" });
+const jpClient = client.withRouting({ region: "JP" });
 ```
-
-Available IP types: `residential`, `mobile`, `datacenter`, `business`
 
 ## SOCKS5 Proxy
 
@@ -116,6 +112,5 @@ Note: HTTP errors from the target website (e.g. 404, 500) are **not** thrown as 
 | `apiKey`    | (required)                 | API key (`sr_live_...`)                  |
 | `gatewayUrl`| `"http://localhost:8080"`  | Proxy gateway URL                        |
 | `protocol`  | `"http"`                   | `"http"` or `"socks5"`                   |
-| `ipType`    | `undefined`                | IP type filter                           |
-| `region`    | `undefined`                | Region filter (substring match)          |
+| `region`    | `undefined`                | 2-letter country code (ISO 3166-1 alpha-2) |
 | `timeout`   | `30000`                    | Request timeout in milliseconds          |
