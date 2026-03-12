@@ -18,6 +18,16 @@ import { ProxyResponse } from "./models.js";
 
 const DEFAULT_HTTP_GATEWAY = "http://localhost:8080";
 const DEFAULT_TIMEOUT = 30_000;
+const REGION_RE = /^[A-Z]{2}$/;
+
+/** Throw if region is not a 2-letter country code. */
+function validateRegion(region: string): void {
+  if (!REGION_RE.test(region)) {
+    throw new Error(
+      `region must be a 2-letter country code (ISO 3166-1 alpha-2), got "${region}"`,
+    );
+  }
+}
 
 /** Options passed through to individual requests. */
 export interface RequestOptions {
@@ -126,6 +136,7 @@ export class SpaceRouter {
     this._protocol = options?.protocol ?? "http";
     this._ipType = options?.ipType;
     this._region = options?.region;
+    if (this._region) validateRegion(this._region);
     this._timeout = options?.timeout ?? DEFAULT_TIMEOUT;
     this._agent = buildAgent(apiKey, this._gatewayUrl, this._protocol);
   }

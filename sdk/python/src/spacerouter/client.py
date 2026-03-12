@@ -24,6 +24,16 @@ IpType = Literal["residential", "mobile", "datacenter", "business"]
 _DEFAULT_HTTP_GATEWAY = "http://localhost:8080"
 _DEFAULT_SOCKS5_GATEWAY = "socks5://localhost:1080"
 
+_REGION_RE = __import__("re").compile(r"^[A-Z]{2}$")
+
+
+def _validate_region(region: str) -> None:
+    """Raise ``ValueError`` if *region* is not a 2-letter country code."""
+    if not _REGION_RE.match(region):
+        raise ValueError(
+            f"region must be a 2-letter country code (ISO 3166-1 alpha-2), got {region!r}"
+        )
+
 
 def _build_proxy(
     api_key: str,
@@ -50,6 +60,7 @@ def _build_proxy(
     if ip_type:
         proxy_headers["X-SpaceRouter-IP-Type"] = ip_type
     if region:
+        _validate_region(region)
         proxy_headers["X-SpaceRouter-Region"] = region
 
     if proxy_headers:

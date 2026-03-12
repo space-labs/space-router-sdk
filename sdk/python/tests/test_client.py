@@ -8,7 +8,7 @@ from spacerouter import (
     AsyncSpaceRouter,
     SpaceRouter,
 )
-from spacerouter.client import _build_proxy, _check_proxy_errors
+from spacerouter.client import _build_proxy, _check_proxy_errors, _validate_region
 from spacerouter.exceptions import (
     AuthenticationError,
     NoNodesAvailableError,
@@ -46,6 +46,25 @@ class TestBuildProxy:
     def test_without_routing_returns_string(self):
         result = _build_proxy("key", "http://gw:8080", "http", None, None)
         assert isinstance(result, str)
+
+    def test_rejects_invalid_region(self):
+        with pytest.raises(ValueError, match="2-letter country code"):
+            _build_proxy("key", "http://gw:8080", "http", None, "Seoul, KR")
+        with pytest.raises(ValueError, match="2-letter country code"):
+            _build_proxy("key", "http://gw:8080", "http", None, "USA")
+        with pytest.raises(ValueError, match="2-letter country code"):
+            _build_proxy("key", "http://gw:8080", "http", None, "u")
+
+
+class TestValidateRegion:
+    def test_valid_codes(self):
+        for code in ("US", "KR", "JP", "DE", "BR"):
+            _validate_region(code)  # should not raise
+
+    @pytest.mark.parametrize("bad", ["Seoul, KR", "USA", "u", "us", "123", ""])
+    def test_invalid_codes(self, bad):
+        with pytest.raises(ValueError, match="2-letter country code"):
+            _validate_region(bad)
 
 
 # ---------------------------------------------------------------------------

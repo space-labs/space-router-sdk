@@ -9,7 +9,7 @@ export interface SpaceRouterOptions {
   protocol?: "http" | "socks5";
   /** IP type filter for node selection. */
   ipType?: IpType;
-  /** Region filter for node selection (substring match). */
+  /** Region filter — 2-letter country code (ISO 3166-1 alpha-2, e.g. "US"). */
   region?: string;
   /** Request timeout in milliseconds. Default: `30_000` */
   timeout?: number;

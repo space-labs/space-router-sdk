@@ -39,7 +39,7 @@ const client = new SpaceRouter("sr_live_xxx", {
 // Target mobile IPs in South Korea
 const mobile = new SpaceRouter("sr_live_xxx", {
   ipType: "mobile",
-  region: "Seoul, KR",
+  region: "KR",
 });
 
 // Change routing on the fly
@@ -117,5 +117,5 @@ Note: HTTP errors from the target website (e.g. 404, 500) are **not** thrown as 
 | `gatewayUrl`| `"http://localhost:8080"`  | Proxy gateway URL                        |
 | `protocol`  | `"http"`                   | `"http"` or `"socks5"`                   |
 | `ipType`    | `undefined`                | IP type filter                           |
-| `region`    | `undefined`                | Region filter (substring match)          |
+| `region`    | `undefined`                | 2-letter country code (ISO 3166-1 alpha-2) |
 | `timeout`   | `30000`                    | Request timeout in milliseconds          |

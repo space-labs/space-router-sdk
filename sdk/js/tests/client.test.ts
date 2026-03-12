@@ -282,6 +282,18 @@ describe("SpaceRouter", () => {
     routed.close();
   });
 
+  it("rejects invalid region", () => {
+    expect(() => new SpaceRouter("sr_live_test", { region: "Seoul, KR" })).toThrow(
+      "2-letter country code",
+    );
+    expect(() => new SpaceRouter("sr_live_test", { region: "USA" })).toThrow(
+      "2-letter country code",
+    );
+    expect(() => new SpaceRouter("sr_live_test", { region: "us" })).toThrow(
+      "2-letter country code",
+    );
+  });
+
   it("injects routing headers", async () => {
     const client = new SpaceRouter("sr_live_test", {
       ipType: "residential",

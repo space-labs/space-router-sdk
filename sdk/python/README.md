@@ -42,7 +42,7 @@ Route requests through specific IP types or geographic regions:
 client = SpaceRouter("sr_live_xxx", ip_type="residential", region="US")
 
 # Target mobile IPs in South Korea
-client = SpaceRouter("sr_live_xxx", ip_type="mobile", region="Seoul, KR")
+client = SpaceRouter("sr_live_xxx", ip_type="mobile", region="KR")
 
 # Change routing on the fly
 mobile_client = client.with_routing(ip_type="mobile", region="JP")
@@ -117,5 +117,5 @@ Note: HTTP errors from the target website (e.g. 404, 500) are **not** raised as 
 | `gateway_url` | `http://localhost:8080` | Proxy gateway URL |
 | `protocol` | `http` | `http` or `socks5` |
 | `ip_type` | `None` | IP type filter |
-| `region` | `None` | Region filter (substring match) |
+| `region` | `None` | 2-letter country code (ISO 3166-1 alpha-2) |
 | `timeout` | `30.0` | Request timeout in seconds |
