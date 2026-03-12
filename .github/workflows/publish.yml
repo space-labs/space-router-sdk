@@ -1,0 +1,48 @@
+name: Publish to PyPI
+
+on:
+  push:
+    tags:
+      - "v*"
+
+jobs:
+  test:
+    uses: ./.github/workflows/test.yml
+
+  publish-sdk:
+    name: Publish Python SDK
+    needs: test
+    runs-on: ubuntu-latest
+    environment: pypi
+    permissions:
+      id-token: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install build
+      - run: python -m build
+        working-directory: sdk/python
+      - uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          packages-dir: sdk/python/dist/
+
+  publish-cli:
+    name: Publish CLI
+    needs: [test, publish-sdk]
+    runs-on: ubuntu-latest
+    environment: pypi
+    permissions:
+      id-token: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install build
+      - run: python -m build
+        working-directory: cli
+      - uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          packages-dir: cli/dist/
