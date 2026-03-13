@@ -5,13 +5,13 @@ JavaScript/TypeScript SDK for routing HTTP requests through the [Space Router](.
 ## Installation
 
 ```bash
-npm install spacerouter
+npm install @spacenetwork/spacerouter
 ```
 
 ## Quick Start
 
 ```ts
-import { SpaceRouter } from "spacerouter";
+import { SpaceRouter } from "@spacenetwork/spacerouter";
 
 const client = new SpaceRouter("sr_live_YOUR_API_KEY", {
   gatewayUrl: "http://gateway:8080",
@@ -58,7 +58,7 @@ const response = await client.get("https://httpbin.org/ip");
 ## API Key Management
 
 ```ts
-import { SpaceRouterAdmin } from "spacerouter";
+import { SpaceRouterAdmin } from "@spacenetwork/spacerouter";
 
 const admin = new SpaceRouterAdmin("http://localhost:8000");
 
@@ -79,13 +79,13 @@ await admin.revokeApiKey(key.id);
 ## Error Handling
 
 ```ts
-import { SpaceRouter } from "spacerouter";
+import { SpaceRouter } from "@spacenetwork/spacerouter";
 import {
   AuthenticationError,   // 407 - invalid API key
   RateLimitError,        // 429 - rate limit exceeded
   NoNodesAvailableError, // 503 - no residential nodes online
   UpstreamError,         // 502 - target unreachable via node
-} from "spacerouter";
+} from "@spacenetwork/spacerouter";
 
 const client = new SpaceRouter("sr_live_xxx");
 try {

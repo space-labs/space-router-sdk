@@ -7,7 +7,7 @@ Client libraries and CLI for the [Space Router](https://spacerouter.org) residen
 | Package | Language | Registry | Description |
 |---|---|---|---|
 | [`spacerouter`](sdk/python/) | Python | [PyPI](https://pypi.org/project/spacerouter/) | Python SDK — proxy client + admin API |
-| [`spacerouter`](sdk/js/) | TypeScript | [npm](https://www.npmjs.com/package/spacerouter) | JavaScript SDK — proxy client + admin API |
+| [`@spacenetwork/spacerouter`](sdk/js/) | TypeScript | [npm](https://www.npmjs.com/package/@spacenetwork/spacerouter) | JavaScript SDK — proxy client + admin API |
 | [`spacerouter-cli`](cli/) | Python | [PyPI](https://pypi.org/project/spacerouter-cli/) | CLI for AI agents and developers |
 
 ## Quick start
@@ -29,11 +29,11 @@ async with SpaceRouter(api_key="sr_...") as client:
 ### JavaScript SDK
 
 ```bash
-npm install spacerouter
+npm install @spacenetwork/spacerouter
 ```
 
 ```typescript
-import { SpaceRouter } from "spacerouter";
+import { SpaceRouter } from "@spacenetwork/spacerouter";
 
 const client = new SpaceRouter({ apiKey: "sr_..." });
 const response = await client.get("https://httpbin.org/ip");
