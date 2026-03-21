@@ -5,9 +5,6 @@ These tests hit the **live** Coordination API and proxy gateway at
 variable to be set to a billing-provisioned key:
 
     SR_API_KEY=sr_live_xxx pytest tests/test_integration.py -v
-
-The CA certificate needed for proxy TLS verification is fetched
-automatically from the Coordination API's ``/ca-cert`` endpoint.
 """
 
 from __future__ import annotations
