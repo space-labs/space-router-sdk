@@ -6,9 +6,6 @@
  * variable to be set to a billing-provisioned key:
  *
  *     SR_API_KEY=sr_live_xxx npx vitest run tests/integration.test.ts
- *
- * The CA certificate needed for proxy TLS verification is fetched
- * automatically from the Coordination API's `/ca-cert` endpoint.
  */
 
 import { describe, it, expect } from "vitest";
@@ -26,7 +23,6 @@ const API_KEY = process.env.SR_API_KEY;
 
 describe.skipIf(!API_KEY)("Integration", () => {
   it("proxy request with billing-provisioned key", { timeout: 30_000 }, async () => {
-    // Let the SDK auto-fetch the CA cert from /ca-cert.
     const client = new SpaceRouter(API_KEY!, {
       gatewayUrl: GATEWAY_URL,
     });
