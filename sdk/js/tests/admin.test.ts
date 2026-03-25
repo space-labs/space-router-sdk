@@ -211,25 +211,29 @@ describe("SpaceRouterAdmin", () => {
   });
 
   describe("updateNodeStatus", () => {
-    it("sends PATCH", async () => {
+    it("sends PATCH with auth", async () => {
       const fetchSpy = mockFetch(200, { ok: true });
       const admin = new SpaceRouterAdmin();
-      await admin.updateNodeStatus("node-1", "draining");
+      const auth = { walletAddress: "0xabc", signature: "0xsig", timestamp: 1234567890 };
+      await admin.updateNodeStatus("node-1", "draining", auth);
 
       const [url, init] = fetchSpy.mock.calls[0];
       expect(url).toBe("https://coordination.spacerouter.org/nodes/node-1/status");
       expect(init.method).toBe("PATCH");
       const body = JSON.parse(init.body as string);
       expect(body.status).toBe("draining");
+      expect(body.wallet_address).toBe("0xabc");
+      expect(body.signature).toBe("0xsig");
       admin.close();
     });
   });
 
   describe("deleteNode", () => {
-    it("sends DELETE", async () => {
+    it("sends DELETE with auth", async () => {
       const fetchSpy = mockFetch(204);
       const admin = new SpaceRouterAdmin();
-      await admin.deleteNode("node-uuid");
+      const auth = { walletAddress: "0xabc", signature: "0xsig", timestamp: 1234567890 };
+      await admin.deleteNode("node-uuid", auth);
 
       const [url, init] = fetchSpy.mock.calls[0];
       expect(url).toBe("https://coordination.spacerouter.org/nodes/node-uuid");

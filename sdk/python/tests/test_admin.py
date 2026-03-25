@@ -172,16 +172,20 @@ class TestNodeManagement:
         respx.patch("https://coordination.spacerouter.org/nodes/node-1/status").mock(
             return_value=httpx.Response(200, json={"ok": True})
         )
+        from eth_account import Account
+        key = Account.create().key.hex()
         with SpaceRouterAdmin() as admin:
-            admin.update_node_status("node-1", status="draining")
+            admin.update_node_status("node-1", status="draining", private_key=key)
 
     @respx.mock
     def test_delete_node(self):
-        respx.delete("https://coordination.spacerouter.org/nodes/node-uuid").mock(
+        respx.request("DELETE", "https://coordination.spacerouter.org/nodes/node-uuid").mock(
             return_value=httpx.Response(204)
         )
+        from eth_account import Account
+        key = Account.create().key.hex()
         with SpaceRouterAdmin() as admin:
-            admin.delete_node("node-uuid")
+            admin.delete_node("node-uuid", private_key=key)
 
 
 # ---------------------------------------------------------------------------
