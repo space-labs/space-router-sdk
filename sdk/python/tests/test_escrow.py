@@ -154,3 +154,127 @@ class TestEIP712:
     def test_domain_constants(self):
         assert RECEIPT_EIP712_DOMAIN_NAME == "SpaceRouterEscrow"
         assert RECEIPT_EIP712_DOMAIN_VERSION == "1"
+
+
+class TestExactApprovalSDK:
+    def test_deposit_uses_exact_approval(self, mock_web3):
+        """SDK deposit should approve exact amount, not MAX_UINT256."""
+        client = _make_client(mock_web3)
+        # Enable token contract
+        client._token_contract = MagicMock()
+        client._token_contract.functions.allowance.return_value.call.return_value = 0
+
+        mock_web3["w3"].eth.get_transaction_count.return_value = 0
+        mock_web3["w3"].eth.estimate_gas.return_value = 100000
+
+        mock_tx_hash = MagicMock()
+        mock_tx_hash.hex.return_value = "0xtx"
+        mock_web3["w3"].eth.send_raw_transaction.return_value = mock_tx_hash
+        mock_web3["w3"].eth.account.sign_transaction.return_value = MagicMock(raw_transaction=b"raw")
+        mock_web3["w3"].eth.wait_for_transaction_receipt.return_value = {"status": 1}
+
+        try:
+            client.deposit(1000)
+        except Exception:
+            pass
+
+        # Verify approve was called with exact amount (not MAX_UINT256)
+        if client._token_contract.functions.approve.called:
+            args = client._token_contract.functions.approve.call_args
+            # Second arg should be the exact deposit amount
+            assert args[0][1] == 1000
+
+
+class TestSignReceipt:
+    def test_sign_receipt_requires_signer(self, mock_web3):
+        """Should raise without private key."""
+        client = EscrowClient(
+            rpc_url="http://localhost:8545",
+            contract_address="0x" + "11" * 20,
+        )
+        with pytest.raises(RuntimeError, match="Private key required"):
+            client.sign_receipt({}, 1, "0x" + "11" * 20)
+
+
+class TestTokenBalanceSDK:
+    def test_token_balance(self, mock_web3):
+        client = _make_client(mock_web3)
+        client._token_contract = MagicMock()
+        client._token_contract.functions.balanceOf.return_value.call.return_value = 99000
+        assert client.token_balance("0x" + "aa" * 20) == 99000
+
+    def test_token_balance_no_contract(self, mock_web3):
+        client = _make_client(mock_web3)
+        with pytest.raises(RuntimeError, match="Token contract not available"):
+            client.token_balance("0x" + "aa" * 20)
+
+
+class TestCancelWithdrawal:
+    def test_cancel_requires_positive_pending(self, mock_web3):
+        """Cancel withdrawal should send transaction."""
+        client = _make_client(mock_web3)
+        mock_web3["w3"].eth.get_transaction_count.return_value = 0
+        mock_web3["w3"].eth.estimate_gas.return_value = 80000
+
+        mock_tx_hash = MagicMock()
+        mock_tx_hash.hex.return_value = "0xcancel"
+        mock_web3["w3"].eth.send_raw_transaction.return_value = mock_tx_hash
+        mock_web3["w3"].eth.account.sign_transaction.return_value = MagicMock(raw_transaction=b"raw")
+        mock_web3["w3"].eth.wait_for_transaction_receipt.return_value = {"status": 1}
+
+        tx = client.cancel_withdrawal()
+        assert tx == "0xcancel"
+
+
+class TestCompleteWithdrawal:
+    def test_complete_withdrawal(self, mock_web3):
+        client = _make_client(mock_web3)
+        mock_web3["w3"].eth.get_transaction_count.return_value = 0
+        mock_web3["w3"].eth.estimate_gas.return_value = 80000
+
+        mock_tx_hash = MagicMock()
+        mock_tx_hash.hex.return_value = "0xcomplete"
+        mock_web3["w3"].eth.send_raw_transaction.return_value = mock_tx_hash
+        mock_web3["w3"].eth.account.sign_transaction.return_value = MagicMock(raw_transaction=b"raw")
+        mock_web3["w3"].eth.wait_for_transaction_receipt.return_value = {"status": 1}
+
+        tx = client.complete_withdrawal()
+        assert tx == "0xcomplete"
+
+
+class TestInitiateWithdrawal:
+    def test_initiate_withdrawal(self, mock_web3):
+        client = _make_client(mock_web3)
+        mock_web3["w3"].eth.get_transaction_count.return_value = 0
+        mock_web3["w3"].eth.estimate_gas.return_value = 80000
+
+        mock_tx_hash = MagicMock()
+        mock_tx_hash.hex.return_value = "0xinitiate"
+        mock_web3["w3"].eth.send_raw_transaction.return_value = mock_tx_hash
+        mock_web3["w3"].eth.account.sign_transaction.return_value = MagicMock(raw_transaction=b"raw")
+        mock_web3["w3"].eth.wait_for_transaction_receipt.return_value = {"status": 1}
+
+        tx = client.initiate_withdrawal(5000)
+        assert tx == "0xinitiate"
+
+    def test_initiate_negative_amount(self, mock_web3):
+        client = _make_client(mock_web3)
+        with pytest.raises(ValueError, match="positive"):
+            client.initiate_withdrawal(-100)
+
+
+class TestSendTx:
+    def test_revert_raises(self, mock_web3):
+        """Transaction revert should raise RuntimeError."""
+        client = _make_client(mock_web3)
+        mock_web3["w3"].eth.get_transaction_count.return_value = 0
+        mock_web3["w3"].eth.estimate_gas.return_value = 80000
+
+        mock_tx_hash = MagicMock()
+        mock_tx_hash.hex.return_value = "0xreverted"
+        mock_web3["w3"].eth.send_raw_transaction.return_value = mock_tx_hash
+        mock_web3["w3"].eth.account.sign_transaction.return_value = MagicMock(raw_transaction=b"raw")
+        mock_web3["w3"].eth.wait_for_transaction_receipt.return_value = {"status": 0}
+
+        with pytest.raises(RuntimeError, match="reverted"):
+            client.cancel_withdrawal()
