@@ -97,6 +97,9 @@ class ClientIdentity:
                 ".from_keystore() to create an instance."
             )
         self._account = _account
+        # Cache lowercased address — avoids repeated .lower() allocation on every
+        # property access and every sign_auth_header() call.
+        self._address: str = _account.address.lower()
         self._payment_address: str | None = None
 
     @classmethod
@@ -156,7 +159,7 @@ class ClientIdentity:
     @property
     def address(self) -> str:
         """Identity address (lowercase, 0x-prefixed)."""
-        return self._account.address.lower()
+        return self._address
 
     @property
     def payment_address(self) -> str | None:

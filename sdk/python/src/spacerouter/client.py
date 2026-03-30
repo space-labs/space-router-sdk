@@ -158,18 +158,11 @@ class SpaceRouter:
         self._timeout = timeout
 
         verify = httpx_kwargs.pop("verify", True)
-        if api_key:
-            proxy = _build_proxy(api_key, gateway_url, protocol, region, ip_type)
-            self._client = httpx.Client(
-                proxy=proxy, timeout=timeout, verify=verify, **httpx_kwargs,
-            )
-        else:
-            # Identity-authenticated: no proxy credentials needed at init.
-            # Auth headers are added per-request.
-            proxy = _build_proxy("identity", gateway_url, protocol, region, ip_type)
-            self._client = httpx.Client(
-                proxy=proxy, timeout=timeout, verify=verify, **httpx_kwargs,
-            )
+        effective_key = api_key or "identity"
+        proxy = _build_proxy(effective_key, gateway_url, protocol, region, ip_type)
+        self._client = httpx.Client(
+            proxy=proxy, timeout=timeout, verify=verify, **httpx_kwargs,
+        )
 
     # -- HTTP methods -------------------------------------------------------
 

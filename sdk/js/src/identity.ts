@@ -119,11 +119,15 @@ export async function createVouchingSignature(
 export class ClientIdentity {
   private _account: ReturnType<typeof privateKeyToAccount>;
   private _keyHex: `0x${string}`;
+  private _address: string;
   private _paymentAddress?: string;
 
   private constructor(account: ReturnType<typeof privateKeyToAccount>, keyHex: `0x${string}`) {
     this._account = account;
     this._keyHex = keyHex;
+    // Cache lowercased address — avoids a .toLowerCase() allocation on every
+    // property access and every signAuthHeaders() call.
+    this._address = account.address.toLowerCase();
   }
 
   /** Create from a raw private key. */
@@ -156,7 +160,7 @@ export class ClientIdentity {
 
   /** Identity address (lowercase, 0x-prefixed). */
   get address(): string {
-    return this._account.address.toLowerCase();
+    return this._address;
   }
 
   /** Optional payment wallet address. */
