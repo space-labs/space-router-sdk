@@ -66,10 +66,10 @@ def show(
         "--keystore-path", "-k",
         help="Path to the identity keystore.",
     ),
-    passphrase: str = typer.Option(
-        "",
+    passphrase: bool = typer.Option(
+        False,
         "--passphrase", "-p",
-        help="Passphrase for encrypted keystore (or empty for plaintext).",
+        help="Prompt for passphrase (encrypted keystore).",
     ),
 ) -> None:
     """Show the identity address from the configured keystore."""
@@ -80,8 +80,12 @@ def show(
         typer.echo(json.dumps({"error": f"Keystore not found: {keystore_path}"}))
         raise typer.Exit(1)
 
+    pw = ""
+    if passphrase:
+        pw = typer.prompt("Enter passphrase", hide_input=True)
+
     try:
-        identity = ClientIdentity.from_keystore(keystore_path, passphrase)
+        identity = ClientIdentity.from_keystore(keystore_path, pw)
     except ValueError as e:
         typer.echo(json.dumps({"error": str(e)}))
         raise typer.Exit(1)
@@ -104,10 +108,10 @@ def export_keystore(
         "--output", "-o",
         help="Output path for the exported keystore.",
     ),
-    passphrase: str = typer.Option(
-        "",
+    passphrase: bool = typer.Option(
+        False,
         "--passphrase", "-p",
-        help="Passphrase for the source keystore.",
+        help="Prompt for passphrase (encrypted source keystore).",
     ),
     encrypt: bool = typer.Option(
         True,
@@ -123,8 +127,12 @@ def export_keystore(
         typer.echo(json.dumps({"error": f"Keystore not found: {keystore_path}"}))
         raise typer.Exit(1)
 
+    src_pw = ""
+    if passphrase:
+        src_pw = typer.prompt("Enter source passphrase", hide_input=True)
+
     try:
-        identity = ClientIdentity.from_keystore(keystore_path, passphrase)
+        identity = ClientIdentity.from_keystore(keystore_path, src_pw)
     except ValueError as e:
         typer.echo(json.dumps({"error": str(e)}))
         raise typer.Exit(1)

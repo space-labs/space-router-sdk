@@ -77,6 +77,16 @@ describe("ClientIdentity", () => {
       const now = Math.floor(Date.now() / 1000);
       expect(Math.abs(ts - now)).toBeLessThan(5);
     });
+
+    it("signAuthHeaders rejects NaN timestamp", async () => {
+      const identity = ClientIdentity.fromPrivateKey(TEST_KEY);
+      await expect(identity.signAuthHeaders(NaN)).rejects.toThrow(/finite number/);
+    });
+
+    it("signAuthHeaders rejects Infinity timestamp", async () => {
+      const identity = ClientIdentity.fromPrivateKey(TEST_KEY);
+      await expect(identity.signAuthHeaders(Infinity)).rejects.toThrow(/finite number/);
+    });
   });
 
   describe("payment address", () => {
@@ -95,7 +105,7 @@ describe("ClientIdentity", () => {
   });
 
   describe("keystore", () => {
-    it("save and load roundtrip", () => {
+    it("save and load roundtrip (plaintext)", () => {
       const path = join(testDir, "identity.key");
       const original = ClientIdentity.fromPrivateKey(TEST_KEY);
       original.saveKeystore(path);
@@ -108,6 +118,28 @@ describe("ClientIdentity", () => {
       const original = ClientIdentity.generate(path);
       const loaded = ClientIdentity.fromKeystore(path);
       expect(loaded.address).toBe(original.address);
+    });
+
+    it("save and load roundtrip (encrypted)", () => {
+      const path = join(testDir, "identity.json");
+      const original = ClientIdentity.fromPrivateKey(TEST_KEY);
+      original.saveKeystore(path, "test-passphrase");
+      const loaded = ClientIdentity.fromKeystore(path, "test-passphrase");
+      expect(loaded.address).toBe(original.address);
+    });
+
+    it("encrypted keystore requires passphrase", () => {
+      const path = join(testDir, "identity.json");
+      const original = ClientIdentity.fromPrivateKey(TEST_KEY);
+      original.saveKeystore(path, "test-passphrase");
+      expect(() => ClientIdentity.fromKeystore(path)).toThrow(/passphrase/);
+    });
+
+    it("encrypted keystore rejects wrong passphrase", () => {
+      const path = join(testDir, "identity.json");
+      const original = ClientIdentity.fromPrivateKey(TEST_KEY);
+      original.saveKeystore(path, "test-passphrase");
+      expect(() => ClientIdentity.fromKeystore(path, "wrong")).toThrow(/MAC/);
     });
   });
 

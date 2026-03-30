@@ -139,11 +139,12 @@ class TestIdentityShow:
 
         result = runner.invoke(
             _app(),
-            ["identity", "show", "--keystore-path", keystore, "--passphrase", "wrong"],
+            ["identity", "show", "--keystore-path", keystore, "--passphrase"],
+            input="wrong\n",
         )
 
         assert result.exit_code != 0
-        data = parse_json_output(result.output)
+        data = parse_last_json(result.output)
         assert "error" in data
 
 
@@ -246,13 +247,14 @@ class TestIdentityExport:
                 "identity", "export",
                 "--keystore-path", src,
                 "--output", dst,
-                "--passphrase", "wrong",
+                "--passphrase",
                 "--no-encrypt",
             ],
+            input="wrong\n",
         )
 
         assert result.exit_code != 0
-        data = parse_json_output(result.output)
+        data = parse_last_json(result.output)
         assert "error" in data
 
 

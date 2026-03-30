@@ -96,7 +96,9 @@ class ClientIdentity:
                 "Use ClientIdentity.generate(), .from_private_key(), or "
                 ".from_keystore() to create an instance."
             )
-        self._account = _account
+        # Double-underscore triggers Python name mangling: external access
+        # requires ``_ClientIdentity__account``, preventing accidental exposure.
+        self.__account = _account
         # Cache lowercased address — avoids repeated .lower() allocation on every
         # property access and every sign_auth_header() call.
         self._address: str = _account.address.lower()
@@ -136,21 +138,21 @@ class ClientIdentity:
         with open(path) as f:
             content = f.read().strip()
 
+        # Try JSON parse; if it fails, fall through to raw hex.
         try:
             data = json.loads(content)
-            if isinstance(data, dict) and ("crypto" in data or "Crypto" in data):
-                if not passphrase:
-                    raise ValueError(
-                        f"Keystore at {path!r} is encrypted — passphrase required."
-                    )
-                private_key_bytes = Account.decrypt(data, passphrase)
-                account = Account.from_key(private_key_bytes)
-                return cls(_account=account)
-        except (json.JSONDecodeError, ValueError) as exc:
-            if "passphrase" in str(exc):
-                raise
-            # Not JSON — fall through to raw hex
-            pass
+        except json.JSONDecodeError:
+            data = None
+
+        # Keystore detected — decryption errors must NOT fall through to hex.
+        if isinstance(data, dict) and ("crypto" in data or "Crypto" in data):
+            if not passphrase:
+                raise ValueError(
+                    f"Keystore at {path!r} is encrypted — passphrase required."
+                )
+            private_key_bytes = Account.decrypt(data, passphrase)
+            account = Account.from_key(private_key_bytes)
+            return cls(_account=account)
 
         # Raw hex key file
         account = Account.from_key(content)
@@ -172,10 +174,10 @@ class ClientIdentity:
         self._payment_address = address.lower()
 
     def sign_message(self, message: str) -> str:
-        """EIP-191 sign a message. Returns hex signature."""
+        """EIP-191 sign a message. Returns 0x-prefixed hex signature."""
         msg = encode_defunct(text=message)
-        signed = _w3.eth.account.sign_message(msg, private_key=self._account.key)
-        return signed.signature.hex()
+        signed = _w3.eth.account.sign_message(msg, private_key=self.__account.key)
+        return "0x" + signed.signature.hex()
 
     def sign_auth_header(self, timestamp: int | None = None) -> dict[str, str]:
         """Generate auth headers for Coordination API requests.
@@ -199,13 +201,20 @@ class ClientIdentity:
         os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
         tmp_path = path + ".tmp"
 
-        if passphrase:
-            keystore = Account.encrypt(self._account.key, passphrase)
-            with open(tmp_path, "w") as f:
-                json.dump(keystore, f)
-        else:
-            with open(tmp_path, "w") as f:
-                f.write(self._account.key.hex() + "\n")
-
-        os.chmod(tmp_path, 0o600)
-        os.replace(tmp_path, path)
+        # Use O_CREAT | O_EXCL to avoid TOCTOU race on the temp file.
+        fd = os.open(tmp_path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+        try:
+            with os.fdopen(fd, "w") as f:
+                if passphrase:
+                    keystore = Account.encrypt(self.__account.key, passphrase)
+                    json.dump(keystore, f)
+                else:
+                    f.write(self.__account.key.hex() + "\n")
+            os.replace(tmp_path, path)
+        except BaseException:
+            # Clean up .tmp on any write failure
+            try:
+                os.unlink(tmp_path)
+            except OSError:
+                pass
+            raise

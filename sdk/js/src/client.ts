@@ -239,6 +239,17 @@ export class SpaceRouter {
     region?: string;
     ipType?: IpType;
   }): SpaceRouter {
+    // Preserve identity-based auth across region switches.
+    if (this._identity) {
+      return new SpaceRouter({
+        identity: this._identity,
+        gatewayUrl: this._gatewayUrl,
+        protocol: this._protocol,
+        region: options.region,
+        ipType: options.ipType,
+        timeout: this._timeout,
+      });
+    }
     return new SpaceRouter(this._apiKey, {
       gatewayUrl: this._gatewayUrl,
       protocol: this._protocol,

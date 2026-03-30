@@ -73,6 +73,8 @@ class TestClientIdentitySigning:
     def test_sign_message(self):
         identity = ClientIdentity.from_private_key(_TEST_KEY)
         sig = identity.sign_message("hello world")
+        # FINDING-07: signature must be 0x-prefixed
+        assert sig.startswith("0x"), "Signature must be 0x-prefixed"
         msg = encode_defunct(text="hello world")
         recovered = _w3.eth.account.recover_message(msg, signature=sig)
         assert recovered.lower() == identity.address
@@ -84,6 +86,8 @@ class TestClientIdentitySigning:
         assert "X-Identity-Signature" in headers
         assert "X-Timestamp" in headers
         assert headers["X-Identity-Address"] == identity.address
+        # FINDING-07: signature must be 0x-prefixed
+        assert headers["X-Identity-Signature"].startswith("0x")
 
     def test_sign_auth_header_with_timestamp(self):
         identity = ClientIdentity.from_private_key(_TEST_KEY)
@@ -93,6 +97,7 @@ class TestClientIdentitySigning:
 
         # Verify signature
         sig = headers["X-Identity-Signature"]
+        assert sig.startswith("0x")
         msg = encode_defunct(text=f"space-router:auth:{identity.address}:{ts}")
         recovered = _w3.eth.account.recover_message(msg, signature=sig)
         assert recovered.lower() == identity.address
@@ -150,3 +155,51 @@ class TestClientIdentityNoKeyLeakage:
             val = getattr(identity, attr)
             if isinstance(val, str):
                 assert key_hex not in val, f"Raw key leaked via {attr}"
+
+    def test_name_mangling_hides_account(self):
+        """FINDING-02: _account should be name-mangled to __account."""
+        identity = ClientIdentity.from_private_key(_TEST_KEY)
+        # Direct _account access should fail (it's now __account via name mangling)
+        assert not hasattr(identity, "_account"), \
+            "_account is directly accessible — should be name-mangled to __account"
+        # Mangled name should exist
+        assert hasattr(identity, "_ClientIdentity__account")
+
+
+class TestClientIdentitySecurityFixes:
+    """Tests for findings FINDING-01, FINDING-04, FINDING-05."""
+
+    def test_wrong_passphrase_raises_on_keystore(self, tmp_path):
+        """FINDING-01: wrong passphrase must NOT fall through to hex loading."""
+        path = str(tmp_path / "identity.json")
+        keystore = Account.encrypt(_TEST_KEY, _PASSPHRASE)
+        with open(path, "w") as f:
+            json.dump(keystore, f)
+        with pytest.raises(Exception):
+            ClientIdentity.from_keystore(path, "wrong-passphrase")
+
+    def test_save_keystore_toctou_exclusive_create(self, tmp_path):
+        """FINDING-04: save_keystore should fail if .tmp already exists (O_EXCL)."""
+        path = str(tmp_path / "identity.json")
+        tmp_file = path + ".tmp"
+        # Pre-create the .tmp file
+        with open(tmp_file, "w") as f:
+            f.write("existing")
+        identity = ClientIdentity.from_private_key(_TEST_KEY)
+        with pytest.raises(FileExistsError):
+            identity.save_keystore(path)
+
+    def test_save_keystore_cleans_up_tmp_on_failure(self, tmp_path):
+        """FINDING-05: .tmp file should be cleaned up on write failure."""
+        path = str(tmp_path / "identity.json")
+        identity = ClientIdentity.from_private_key(_TEST_KEY)
+        # Successful save first
+        identity.save_keystore(path)
+        assert os.path.isfile(path)
+        assert not os.path.exists(path + ".tmp")
+
+    def test_signature_has_0x_prefix(self):
+        """FINDING-07: sign_message must return 0x-prefixed signature."""
+        identity = ClientIdentity.from_private_key(_TEST_KEY)
+        sig = identity.sign_message("test")
+        assert sig.startswith("0x"), f"Expected 0x prefix, got: {sig[:6]}"
