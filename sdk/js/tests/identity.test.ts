@@ -110,4 +110,36 @@ describe("ClientIdentity", () => {
       expect(loaded.address).toBe(original.address);
     });
   });
+
+  describe("key non-exposure", () => {
+    it("test_no_raw_key_in_public_attrs: private key must not appear in enumerable properties", () => {
+      const identity = ClientIdentity.fromPrivateKey(TEST_KEY);
+      const keyHex = TEST_KEY.slice(2); // without 0x prefix
+
+      // Collect all own enumerable properties (Object.keys) plus
+      // prototype-level public methods (those not starting with _/#).
+      const ownKeys = Object.keys(identity as unknown as Record<string, unknown>);
+      for (const key of ownKeys) {
+        const val = (identity as unknown as Record<string, unknown>)[key];
+        if (typeof val === "string") {
+          expect(val).not.toContain(keyHex);
+        }
+      }
+
+      // Also verify that JSON serialisation does not leak the key.
+      const serialised = JSON.stringify(identity);
+      expect(serialised).not.toContain(keyHex);
+
+      // Verify that the ES2022 private field is inaccessible via bracket notation.
+      // The field should not exist as an enumerable key.
+      expect(ownKeys).not.toContain("_keyHex");
+      expect(ownKeys).not.toContain("#privateKey");
+    });
+
+    it("address property does not contain the raw private key", () => {
+      const identity = ClientIdentity.fromPrivateKey(TEST_KEY);
+      const keyHex = TEST_KEY.slice(2);
+      expect(identity.address).not.toContain(keyHex);
+    });
+  });
 });

@@ -118,13 +118,16 @@ export async function createVouchingSignature(
  */
 export class ClientIdentity {
   private _account: ReturnType<typeof privateKeyToAccount>;
-  private _keyHex: `0x${string}`;
+  // True ES2022 private field: inaccessible from outside the class at runtime,
+  // not just at TypeScript compile time.  This prevents accidental key leakage
+  // via serialisation, Object.keys(), JSON.stringify(), or property enumeration.
+  #privateKey: `0x${string}`;
   private _address: string;
   private _paymentAddress?: string;
 
   private constructor(account: ReturnType<typeof privateKeyToAccount>, keyHex: `0x${string}`) {
     this._account = account;
-    this._keyHex = keyHex;
+    this.#privateKey = keyHex;
     // Cache lowercased address — avoids a .toLowerCase() allocation on every
     // property access and every signAuthHeaders() call.
     this._address = account.address.toLowerCase();
@@ -200,7 +203,7 @@ export class ClientIdentity {
   /** Save key to a plaintext file (0o600 permissions). */
   saveKeystore(path: string): void {
     mkdirSync(dirname(path), { recursive: true });
-    writeFileSync(path, this._keyHex + "\n", { mode: 0o600 });
+    writeFileSync(path, this.#privateKey + "\n", { mode: 0o600 });
     try {
       chmodSync(path, 0o600);
     } catch {
