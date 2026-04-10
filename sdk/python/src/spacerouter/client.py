@@ -15,6 +15,7 @@ import httpx
 from spacerouter.exceptions import (
     AuthenticationError,
     NoNodesAvailableError,
+    QuotaExceededError,
     RateLimitError,
     UpstreamError,
 )
@@ -74,8 +75,21 @@ def _build_proxy(
 
 
 def _check_proxy_errors(response: httpx.Response) -> None:
-    """Raise typed exceptions for proxy-layer errors (407/429/502/503)."""
+    """Raise typed exceptions for proxy-layer errors (402/407/429/502/503)."""
     request_id = response.headers.get("x-spacerouter-request-id")
+
+    if response.status_code == 402:
+        try:
+            body = response.json()
+        except Exception:
+            body = {}
+        raise QuotaExceededError(
+            body.get("message", "Monthly data transfer limit exceeded"),
+            limit_bytes=body.get("limit_bytes", 0),
+            used_bytes=body.get("used_bytes", 0),
+            status_code=402,
+            request_id=request_id,
+        )
 
     if response.status_code == 407:
         raise AuthenticationError(

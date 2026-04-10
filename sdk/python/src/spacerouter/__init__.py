@@ -5,6 +5,7 @@ from spacerouter.client import AsyncSpaceRouter, SpaceRouter
 from spacerouter.exceptions import (
     AuthenticationError,
     NoNodesAvailableError,
+    QuotaExceededError,
     RateLimitError,
     SpaceRouterError,
     UpstreamError,
@@ -51,6 +52,7 @@ __all__ = [
     "AuthenticationError",
     "RateLimitError",
     "NoNodesAvailableError",
+    "QuotaExceededError",
     "UpstreamError",
     "load_or_create_identity",
     "sign_request",

@@ -10,6 +10,7 @@ import { SocksProxyAgent } from "socks-proxy-agent";
 import {
   AuthenticationError,
   NoNodesAvailableError,
+  QuotaExceededError,
   RateLimitError,
   SpaceRouterError,
   UpstreamError,
@@ -73,6 +74,26 @@ function buildAgent(
 async function checkProxyErrors(response: Response): Promise<void> {
   const requestId =
     response.headers.get("x-spacerouter-request-id") ?? undefined;
+
+  if (response.status === 402) {
+    let limitBytes = 0;
+    let usedBytes = 0;
+    let message = "Monthly data transfer limit exceeded";
+    try {
+      const body = (await response.clone().json()) as Record<string, unknown>;
+      if (typeof body.message === "string") message = body.message;
+      if (typeof body.limit_bytes === "number") limitBytes = body.limit_bytes;
+      if (typeof body.used_bytes === "number") usedBytes = body.used_bytes;
+    } catch {
+      // JSON parse failure — use defaults
+    }
+    throw new QuotaExceededError(message, {
+      limitBytes,
+      usedBytes,
+      statusCode: 402,
+      requestId,
+    });
+  }
 
   if (response.status === 407) {
     throw new AuthenticationError("Invalid or missing API key", {
