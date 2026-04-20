@@ -248,3 +248,107 @@ class TestEscrowClientSDK:
         assert restored.request_uuid == r.request_uuid
         assert restored.data_amount == r.data_amount
         assert restored.total_price == r.total_price
+
+
+# ── Byte count validation (new in feat/sdk-byte-validation) ───────────
+
+class TestByteCountValidation:
+    """SpaceRouterSPACE.validate_receipt rejects inflated dataAmount vs local count."""
+
+    def _client(self, **kwargs):
+        defaults = dict(
+            gateway_url="http://gw:8081",
+            proxy_url="http://gw:8080",
+            private_key=CLIENT_KEY,
+            chain_id=TEST_DOMAIN.chain_id,
+            escrow_contract=TEST_DOMAIN.verifying_contract,
+        )
+        defaults.update(kwargs)
+        return SpaceRouterSPACE(**defaults)
+
+    def _receipt(self, data_amount: int = 10_000, total_price: int = 0):
+        return Receipt(
+            client_address=CLIENT_ADDRESS,
+            node_address=address_to_bytes32(GATEWAY_ADDRESS),
+            request_uuid=str(uuid.uuid4()),
+            data_amount=data_amount,
+            total_price=total_price,
+        )
+
+    def test_matching_bytes_pass(self):
+        c = self._client()
+        r = self._receipt(data_amount=10_000)
+        ok, errors = c.validate_receipt(r, observed_bytes=10_000)
+        assert ok, errors
+
+    def test_within_tolerance_pass(self):
+        """Gateway claims 5% more — default byte_tolerance is 5%."""
+        c = self._client(byte_tolerance=0.05)
+        r = self._receipt(data_amount=10_500)
+        ok, _ = c.validate_receipt(r, observed_bytes=10_000)
+        assert ok
+
+    def test_over_tolerance_rejects(self):
+        c = self._client(byte_tolerance=0.05)
+        r = self._receipt(data_amount=50_000)  # 5x inflation
+        ok, errors = c.validate_receipt(r, observed_bytes=10_000)
+        assert not ok
+        assert any("dataAmount" in e for e in errors)
+
+    def test_absolute_floor_protects_small_requests(self):
+        """Tiny observed byte count: absolute floor (1 KB default) must apply."""
+        c = self._client(byte_tolerance=0.05, byte_tolerance_abs_min=1024)
+        # observed=100, 5% = 5 bytes; floor says allow up to +1024 bytes slack
+        r = self._receipt(data_amount=500)
+        ok, _ = c.validate_receipt(r, observed_bytes=100)
+        assert ok, "floor should tolerate overhead on tiny requests"
+
+        # Over the floor → reject
+        r2 = self._receipt(data_amount=2000)
+        ok2, _ = c.validate_receipt(r2, observed_bytes=100)
+        assert not ok2
+
+    def test_no_observed_bytes_skips_check(self):
+        """When caller doesn't supply observed_bytes, byte check is skipped."""
+        c = self._client()
+        r = self._receipt(data_amount=999_999_999)
+        ok, _ = c.validate_receipt(r)  # no observed_bytes
+        assert ok
+
+    def test_sign_after_validation_raises_on_fraud(self):
+        c = self._client(byte_tolerance=0.05)
+        r = self._receipt(data_amount=50_000)
+        with pytest.raises(ValueError, match="dataAmount"):
+            c.sign_receipt_after_validation(r, observed_bytes=10_000)
+
+    def test_sign_after_validation_signs_on_success(self):
+        c = self._client()
+        r = self._receipt(data_amount=10_000)
+        sig = c.sign_receipt_after_validation(r, observed_bytes=10_000)
+        assert sig.startswith("0x")
+        assert len(sig) == 132  # 0x + 130 hex chars (65 bytes)
+
+
+# ── Byte counter helper ───────────────────────────────────────────────
+
+class TestByteCounter:
+    def test_bytecount_totals(self):
+        from spacerouter.payment import ByteCount
+        bc = ByteCount()
+        bc.add_request(100)
+        bc.add_response(200)
+        assert bc.total == 300
+
+    def test_count_request_bytes_includes_headers(self):
+        from spacerouter.payment import count_request_bytes
+        n = count_request_bytes(
+            "GET", "http://example.com/", None,
+            {"User-Agent": "test", "Accept": "*/*"},
+        )
+        assert n > len("GET http://example.com/ HTTP/1.1\r\n\r\n")
+
+    def test_count_request_bytes_with_body(self):
+        from spacerouter.payment import count_request_bytes
+        body = b"hello"
+        n = count_request_bytes("POST", "/api", body, {})
+        assert n > 5  # includes body + framing

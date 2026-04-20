@@ -65,6 +65,8 @@ class SpaceRouterSPACE:
         domain_name: str = "TokenPaymentEscrow",
         domain_version: str = "1",
         max_rate_per_gb: Optional[int] = None,
+        byte_tolerance: float = 0.05,
+        byte_tolerance_abs_min: int = 1024,
     ) -> None:
         self.gateway_url = gateway_url.rstrip("/")
         self.proxy_url = proxy_url.rstrip("/")
@@ -76,6 +78,13 @@ class SpaceRouterSPACE:
             verifying_contract=escrow_contract,
         )
         self.max_rate_per_gb = max_rate_per_gb
+        # Tolerance for gateway's claimed dataAmount vs local byte count.
+        # Accept whichever is larger: relative (byte_tolerance) or absolute (byte_tolerance_abs_min).
+        # The gateway is stricter (~1%) because it trusts its own observation; consumers sit
+        # behind TLS framing overhead and keep-alive noise, so a slightly looser tolerance
+        # avoids false rejections while still catching gross overcharging.
+        self.byte_tolerance = byte_tolerance
+        self.byte_tolerance_abs_min = byte_tolerance_abs_min
 
     @property
     def address(self) -> str:
@@ -103,8 +112,22 @@ class SpaceRouterSPACE:
         """Sign a receipt received from the gateway after a proxy request."""
         return self.wallet.sign_receipt(receipt, self.domain)
 
-    def validate_receipt(self, receipt: Receipt) -> tuple[bool, list[str]]:
+    def validate_receipt(
+        self,
+        receipt: Receipt,
+        observed_bytes: Optional[int] = None,
+    ) -> tuple[bool, list[str]]:
         """Validate a receipt from the gateway.
+
+        Parameters
+        ----------
+        receipt : Receipt
+            The receipt returned by the gateway for signing.
+        observed_bytes : int, optional
+            The consumer's locally-counted request+response byte total. When
+            supplied, the receipt's ``dataAmount`` is checked against it with
+            tolerance ``max(byte_tolerance * observed, byte_tolerance_abs_min)``.
+            Omit to skip byte validation (e.g. when the caller cannot measure).
 
         Returns (is_valid, list_of_errors).
         """
@@ -128,4 +151,35 @@ class SpaceRouterSPACE:
                     f"Effective rate {effective_rate} exceeds max {self.max_rate_per_gb}"
                 )
 
+        # Byte count check vs locally-observed bytes.
+        if observed_bytes is not None:
+            claimed = receipt.data_amount
+            slack = max(int(observed_bytes * self.byte_tolerance), self.byte_tolerance_abs_min)
+            if claimed > observed_bytes + slack:
+                errors.append(
+                    f"dataAmount {claimed} exceeds observed {observed_bytes} by more than "
+                    f"tolerance ({slack} bytes = max({self.byte_tolerance:.1%}, "
+                    f"{self.byte_tolerance_abs_min}))"
+                )
+            elif claimed < 0:
+                errors.append(f"dataAmount is negative: {claimed}")
+
         return len(errors) == 0, errors
+
+    def sign_receipt_after_validation(
+        self,
+        receipt: Receipt,
+        observed_bytes: Optional[int] = None,
+    ) -> str:
+        """Validate the receipt (incl. byte count) and sign it. Raises on failure.
+
+        This is the recommended entry point for consumer code that has a local
+        byte count — validating-then-signing in one call makes it harder to
+        accidentally sign an unvalidated receipt.
+        """
+        ok, errors = self.validate_receipt(receipt, observed_bytes=observed_bytes)
+        if not ok:
+            raise ValueError(
+                "Refusing to sign receipt (uuid=" + receipt.request_uuid + "): " + "; ".join(errors)
+            )
+        return self.sign_receipt(receipt)
