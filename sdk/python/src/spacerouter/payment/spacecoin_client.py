@@ -71,6 +71,9 @@ class SpaceRouterSPACE:
         self.gateway_url = gateway_url.rstrip("/")
         self.proxy_url = proxy_url.rstrip("/")
         self.wallet = ClientPaymentWallet(private_key)
+        # Retained so sync_receipts() can hand it to ConsumerSettlementClient
+        # without reaching into wallet internals. Kept private.
+        self._private_key = private_key
         self.domain = EIP712Domain(
             name=domain_name,
             version=domain_version,
@@ -111,6 +114,28 @@ class SpaceRouterSPACE:
     def sign_receipt(self, receipt: Receipt) -> str:
         """Sign a receipt received from the gateway after a proxy request."""
         return self.wallet.sign_receipt(receipt, self.domain)
+
+    async def sync_receipts(self, limit: int = 50) -> dict:
+        """Settle any pending Leg 1 receipts owed by this consumer.
+
+        Fetches unsigned receipts from the gateway's
+        ``GET /leg1/pending``, signs each with EIP-712, and submits via
+        ``POST /leg1/sign``. Returns ``{accepted, rejected, pending_count}``.
+
+        Call this after each paid proxy request for immediate settlement,
+        or periodically for batch settlement. Safe and idempotent — the
+        gateway's consume step is atomic and duplicate calls are no-ops.
+        """
+        from spacerouter.payment.consumer_settlement import (
+            ConsumerSettlementClient,
+        )
+        # Reuse the consumer's private key. ConsumerSettlementClient holds
+        # its own httpx client so callers don't need to pool one here.
+        settler = ConsumerSettlementClient(
+            gateway_url=self.gateway_url,
+            private_key=self._private_key,
+        )
+        return await settler.sync_receipts(limit=limit)
 
     def validate_receipt(
         self,
