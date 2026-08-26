@@ -8,9 +8,11 @@ Covers:
 """
 
 import uuid
+from unittest.mock import MagicMock
 
 import pytest
 from eth_account import Account
+from hexbytes import HexBytes
 from eth_account.messages import encode_defunct
 
 from spacerouter.payment.eip712 import (
@@ -228,6 +230,23 @@ class TestEscrowClientSDK:
         )
         with pytest.raises(ValueError, match="positive"):
             client.deposit(0)
+
+    def test_send_tx_returns_a_0x_prefixed_hash(self):
+        """hexbytes 1.3 dropped the 0x-prefixing HexBytes.hex() override.
+
+        The Python SDK kept calling .hex(), so it returned a bare hash while
+        the JS SDK returned the 0x-prefixed form for the same transaction.
+        """
+        client = EscrowClient(
+            "http://fake:8545",
+            "0x0000000000000000000000000000000000000001",
+            private_key=CLIENT_KEY,
+        )
+        client._w3 = MagicMock()
+        client._w3.eth.send_raw_transaction.return_value = HexBytes("0x" + "ab" * 32)
+        client._w3.eth.wait_for_transaction_receipt.return_value = {"status": 1}
+
+        assert client._send_tx(MagicMock()) == "0x" + "ab" * 32
 
     def test_address_to_bytes32(self):
         b32 = address_to_bytes32(CLIENT_ADDRESS)

@@ -317,13 +317,13 @@ def approve(
     tx_hash = w3.eth.send_raw_transaction(signed.raw_transaction)
     receipt = w3.eth.wait_for_transaction_receipt(tx_hash, timeout=120)
     if receipt["status"] != 1:
-        raise RuntimeError(f"Approve transaction reverted: {tx_hash.hex()}")
+        raise RuntimeError(f"Approve transaction reverted: {tx_hash.to_0x_hex()}")
 
     print_json({
         "action": "approve",
         "amount_wei": int(amount_wei),
         "token": token_addr,
         "spender": spender,
-        "tx_hash": tx_hash.hex() if hasattr(tx_hash, "hex") else str(tx_hash),
+        "tx_hash": tx_hash.to_0x_hex(),
         "from": account.address,
     })

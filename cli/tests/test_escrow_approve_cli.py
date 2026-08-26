@@ -15,6 +15,7 @@ from __future__ import annotations
 from unittest.mock import MagicMock, patch
 
 import pytest
+from hexbytes import HexBytes
 from typer.testing import CliRunner
 
 from spacerouter_cli.main import app
@@ -73,9 +74,7 @@ def _wire_mocks(escrow_cls, web3_cls, *, with_token: bool = True):
     signed_tx = MagicMock()
     signed_tx.raw_transaction = b"\xab\xcd"
     w3_inst.eth.account.sign_transaction.return_value = signed_tx
-    tx_hash_bytes = MagicMock()
-    tx_hash_bytes.hex.return_value = "0xtxhash"
-    w3_inst.eth.send_raw_transaction.return_value = tx_hash_bytes
+    w3_inst.eth.send_raw_transaction.return_value = HexBytes("0x" + "ab" * 32)
     w3_inst.eth.wait_for_transaction_receipt.return_value = {"status": 1}
 
     web3_cls.return_value = w3_inst
@@ -96,7 +95,7 @@ class TestEscrowApprove:
             assert data["amount_wei"] == 10**18
             assert data["spender"] == ESCROW
             assert data["token"] == TOKEN
-            assert data["tx_hash"] == "0xtxhash"
+            assert data["tx_hash"] == "0x" + "ab" * 32
 
     def test_explicit_token_override(self, runner, approve_env):
         custom_token = "0x" + "9" * 40

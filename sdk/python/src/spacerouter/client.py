@@ -10,9 +10,10 @@ import asyncio
 import base64
 import logging
 from concurrent.futures import ThreadPoolExecutor
-from typing import TYPE_CHECKING, Any, Literal
+from typing import TYPE_CHECKING, Any, Literal, TypeVar
 from urllib.parse import urlparse
 
+import httpcore
 import httpx
 
 from spacerouter.exceptions import (
@@ -24,12 +25,21 @@ from spacerouter.exceptions import (
     SpaceRouterError,
     UpstreamError,
 )
-from spacerouter.models import ProxyResponse
+from spacerouter.models import (
+    CONNECT_METADATA_EXTENSION,
+    HEADER_NODE_ID,
+    HEADER_REQUEST_ID,
+    HEADER_ROUTING_TAG,
+    ProxyResponse,
+    read_response_metadata,
+)
 
 if TYPE_CHECKING:
     from spacerouter.payment.spacecoin_client import SpaceRouterSPACE
 
 logger = logging.getLogger(__name__)
+
+_ClientT = TypeVar("_ClientT", httpx.Client, httpx.AsyncClient)
 
 # Headers v1.5 payment injects on every CONNECT. User-supplied request
 # headers MUST NOT override these (see spec §4 single-use challenges).
@@ -86,6 +96,110 @@ def _merge_payment_headers(
     out.update(payment_headers)
     return out
 
+
+_CONNECT_METADATA_HEADERS = (
+    HEADER_NODE_ID,
+    HEADER_REQUEST_ID,
+    HEADER_ROUTING_TAG,
+)
+
+
+def _read_connect_metadata(response: Any, captured: dict[str, str]) -> None:
+    for name, value in response.headers:
+        key = name.decode("ascii", "ignore").lower()
+        if key in _CONNECT_METADATA_HEADERS:
+            captured[key] = value.decode("latin-1")
+
+
+class _ConnectHeaderRecorder:
+    """Proxy-side connection that snapshots the CONNECT response headers.
+
+    httpcore's ``TunnelHTTPConnection`` reads the ``CONNECT`` response,
+    keeps only its network stream and lets the headers fall out of scope,
+    so the gateway's ``X-SpaceRouter-*`` metadata never reaches the
+    caller for HTTPS targets. Wrapping the connection that performs the
+    ``CONNECT`` is the only place those headers still exist.
+    """
+
+    def __init__(self, connection: Any, captured: dict[str, str]) -> None:
+        self._connection = connection
+        self._captured = captured
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(self._connection, name)
+
+
+class _SyncConnectHeaderRecorder(_ConnectHeaderRecorder):
+    def handle_request(self, request: Any) -> Any:
+        response = self._connection.handle_request(request)
+        if request.method == b"CONNECT":
+            _read_connect_metadata(response, self._captured)
+        return response
+
+
+class _AsyncConnectHeaderRecorder(_ConnectHeaderRecorder):
+    async def handle_async_request(self, request: Any) -> Any:
+        response = await self._connection.handle_async_request(request)
+        if request.method == b"CONNECT":
+            _read_connect_metadata(response, self._captured)
+        return response
+
+
+def _install_connect_capture(tunnel: Any) -> None:
+    captured: dict[str, str] = {}
+    tunnel._connection = _SyncConnectHeaderRecorder(tunnel._connection, captured)
+    handle_request = tunnel.handle_request
+
+    def handle_request_with_metadata(request: Any) -> Any:
+        response = handle_request(request)
+        response.extensions[CONNECT_METADATA_EXTENSION] = dict(captured)
+        return response
+
+    tunnel.handle_request = handle_request_with_metadata
+
+
+def _install_async_connect_capture(tunnel: Any) -> None:
+    captured: dict[str, str] = {}
+    tunnel._connection = _AsyncConnectHeaderRecorder(tunnel._connection, captured)
+    handle_async_request = tunnel.handle_async_request
+
+    async def handle_async_request_with_metadata(request: Any) -> Any:
+        response = await handle_async_request(request)
+        response.extensions[CONNECT_METADATA_EXTENSION] = dict(captured)
+        return response
+
+    tunnel.handle_async_request = handle_async_request_with_metadata
+
+
+def _capturing_create_connection(pool: Any) -> Any:
+    create_connection = pool.create_connection
+    install = (
+        _install_async_connect_capture
+        if isinstance(pool, httpcore.AsyncHTTPProxy)
+        else _install_connect_capture
+    )
+
+    def create_connection_with_capture(origin: Any) -> Any:
+        connection = create_connection(origin)
+        if origin.scheme == b"https":
+            install(connection)
+        return connection
+
+    return create_connection_with_capture
+
+
+def _enable_connect_capture(client: _ClientT) -> _ClientT:
+    """Surface gateway CONNECT metadata on the tunnelled response.
+
+    Returns *client* so call sites can wrap construction inline.
+    """
+    for transport in (client._transport, *client._mounts.values()):
+        pool = getattr(transport, "_pool", None)
+        if isinstance(pool, (httpcore.HTTPProxy, httpcore.AsyncHTTPProxy)):
+            pool.create_connection = _capturing_create_connection(pool)
+    return client
+
+
 _DEFAULT_HTTP_GATEWAY = "https://gateway.spacerouter.org"
 
 _REGION_RE = __import__("re").compile(r"^[A-Z]{2}$")
@@ -133,6 +247,7 @@ def _build_proxy(
     if region:
         _validate_region(region)
         proxy_headers["X-SpaceRouter-Region"] = region
+        proxy_headers["X-SpaceRouter-Strict-Routing"] = "1"
     if ip_type:
         proxy_headers["X-SpaceRouter-IP-Type"] = ip_type
 
@@ -178,7 +293,7 @@ def _translate_proxy_error(exc: httpx.ProxyError) -> SpaceRouterError:
 
 def _check_proxy_errors(response: httpx.Response) -> None:
     """Raise typed exceptions for proxy-layer errors (402/407/429/502/503)."""
-    request_id = response.headers.get("x-spacerouter-request-id")
+    request_id = read_response_metadata(response, HEADER_REQUEST_ID)
 
     if response.status_code == 402:
         try:
@@ -276,9 +391,9 @@ class SpaceRouter:
         self._verify = httpx_kwargs.pop("verify", True)
         self._httpx_kwargs = httpx_kwargs
         proxy = _build_proxy(api_key, gateway_url, protocol, region, ip_type)
-        self._client = httpx.Client(
+        self._client = _enable_connect_capture(httpx.Client(
             proxy=proxy, timeout=timeout, verify=self._verify, **httpx_kwargs,
-        )
+        ))
 
     # -- HTTP methods -------------------------------------------------------
 
@@ -298,6 +413,16 @@ class SpaceRouter:
         logged at WARN by default; if the payment client was built with
         ``strict_settlement=True``, :class:`SettlementRejected`
         propagates.
+
+        ``sync_receipts()`` signs and submits every receipt currently
+        pending for this wallet, not only the one this call produced.
+        That sweep is intended: receipts accumulate when a process exits
+        before settling, and a later request is what drains the backlog.
+        The consequence is that one auto-settling request pays off older
+        receipts too, so the on-chain debit can exceed the cost of the
+        request that triggered it. Callers who need per-request control
+        should leave ``auto_settle`` off and call ``sync_receipts()``
+        themselves.
         """
         try:
             if self._payment is not None:
@@ -316,10 +441,10 @@ class SpaceRouter:
                         proxy.headers, payment_headers,
                     )
                     proxy = httpx.Proxy(str(proxy.url), headers=merged_headers)
-                with httpx.Client(
+                with _enable_connect_capture(httpx.Client(
                     proxy=proxy, timeout=self._timeout, verify=self._verify,
                     **self._httpx_kwargs,
-                ) as paid_client:
+                )) as paid_client:
                     response = paid_client.request(method, url, **kwargs)
             else:
                 response = self._client.request(method, url, **kwargs)
@@ -476,9 +601,9 @@ class AsyncSpaceRouter:
         self._verify = httpx_kwargs.pop("verify", True)
         self._httpx_kwargs = httpx_kwargs
         proxy = _build_proxy(api_key, gateway_url, protocol, region, ip_type)
-        self._client = httpx.AsyncClient(
+        self._client = _enable_connect_capture(httpx.AsyncClient(
             proxy=proxy, timeout=timeout, verify=self._verify, **httpx_kwargs,
-        )
+        ))
 
     # -- HTTP methods -------------------------------------------------------
 
@@ -507,10 +632,10 @@ class AsyncSpaceRouter:
                         proxy.headers, payment_headers,
                     )
                     proxy = httpx.Proxy(str(proxy.url), headers=merged_headers)
-                async with httpx.AsyncClient(
+                async with _enable_connect_capture(httpx.AsyncClient(
                     proxy=proxy, timeout=self._timeout, verify=self._verify,
                     **self._httpx_kwargs,
-                ) as paid_client:
+                )) as paid_client:
                     response = await paid_client.request(method, url, **kwargs)
             else:
                 response = await self._client.request(method, url, **kwargs)

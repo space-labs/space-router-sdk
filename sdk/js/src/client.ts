@@ -117,7 +117,10 @@ function buildAgent(
   const proxyHeaders: Record<string, string> = {
     "Proxy-Authorization": `Basic ${Buffer.from(`${apiKey}:`).toString("base64")}`,
   };
-  if (region) proxyHeaders["X-SpaceRouter-Region"] = region;
+  if (region) {
+    proxyHeaders["X-SpaceRouter-Region"] = region;
+    proxyHeaders["X-SpaceRouter-Strict-Routing"] = "1";
+  }
   if (ipType) proxyHeaders["X-SpaceRouter-IP-Type"] = ipType;
 
   // `verify: false` toggles TLS cert verification for both the gateway
@@ -325,7 +328,10 @@ export class SpaceRouter {
         "Proxy-Authorization": `Basic ${Buffer.from(`${this._apiKey}:`).toString("base64")}`,
         ...paymentHeaders,
       };
-      if (this._region) connectHeaders["X-SpaceRouter-Region"] = this._region;
+      if (this._region) {
+        connectHeaders["X-SpaceRouter-Region"] = this._region;
+        connectHeaders["X-SpaceRouter-Strict-Routing"] = "1";
+      }
       if (this._ipType) connectHeaders["X-SpaceRouter-IP-Type"] = this._ipType;
       const tlsOpts = this._verify
         ? undefined
