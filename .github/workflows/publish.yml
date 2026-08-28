@@ -27,6 +27,7 @@ jobs:
       - uses: pypa/gh-action-pypi-publish@release/v1
         with:
           packages-dir: sdk/python/dist/
+          skip-existing: true
 
   publish-cli:
     name: Publish CLI
@@ -46,6 +47,7 @@ jobs:
       - uses: pypa/gh-action-pypi-publish@release/v1
         with:
           packages-dir: cli/dist/
+          skip-existing: true
 
   publish-npm:
     name: Publish JS SDK to npm
@@ -60,14 +62,15 @@ jobs:
         with:
           node-version: "20"
           registry-url: "https://registry.npmjs.org"
+      # Trusted publishing needs a newer npm than any Node release bundles.
+      - run: npm install -g npm@latest
+      - run: npm --version
       - run: npm install
         working-directory: sdk/js
       - run: npm run build
         working-directory: sdk/js
       - name: Publish (rc tag for prereleases, latest for stable)
         working-directory: sdk/js
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
         run: |
           VERSION=$(node -e "console.log(require('./package.json').version)")
           if [[ "$VERSION" == *-* ]]; then TAG=rc; else TAG=latest; fi
