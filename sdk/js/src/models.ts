@@ -3,7 +3,7 @@
 // ---------------------------------------------------------------------------
 
 /** IP address type for filtering proxy nodes. */
-export type IpType = "residential" | "mobile" | "datacenter" | "business";
+export type IpType = "residential" | "mobile" | "business" | "hosting";
 
 /** Node operational status (for status updates). Nodes go online via health probes. */
 export type NodeStatus = "offline" | "draining";

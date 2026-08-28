@@ -14,6 +14,8 @@ def _mock_proxy_response(
     text: str = '{"origin": "73.162.1.1"}',
     headers: dict | None = None,
     request_id: str | None = "req-1",
+    node_id: str | None = "node-1",
+    routing_tag: str | None = "home",
 ):
     resp = MagicMock()
     resp.status_code = status_code
@@ -23,6 +25,8 @@ def _mock_proxy_response(
         all_headers["x-spacerouter-request-id"] = request_id
     resp.headers = all_headers
     resp.request_id = request_id
+    resp.node_id = node_id
+    resp.routing_tag = routing_tag
     return resp
 
 
@@ -46,6 +50,8 @@ class TestGet:
         data = parse_json_output(result.output)
         assert data["status_code"] == 200
         assert data["spacerouter"]["request_id"] == "req-1"
+        assert data["spacerouter"]["node_id"] == "node-1"
+        assert data["spacerouter"]["routing_tag"] == "home"
         assert data["body"]["origin"] == "73.162.1.1"
 
     @patch("spacerouter_cli.commands.request.SpaceRouter")

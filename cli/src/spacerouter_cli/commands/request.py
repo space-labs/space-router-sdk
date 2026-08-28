@@ -34,7 +34,7 @@ ApiKeyOpt = Annotated[Optional[str], typer.Option("--api-key", help="API key for
 GatewayOpt = Annotated[Optional[str], typer.Option("--gateway-url", help="Proxy gateway URL.")]
 HeaderOpt = Annotated[Optional[list[str]], typer.Option("--header", "-H", help="Custom header (Name: Value). Repeatable.")]
 RegionOpt = Annotated[Optional[str], typer.Option("--region", help="2-letter country code (e.g. US, KR).")]
-IpTypeOpt = Annotated[Optional[str], typer.Option("--ip-type", help="IP type filter: residential, mobile, datacenter, business.")]
+IpTypeOpt = Annotated[Optional[str], typer.Option("--ip-type", help="IP type filter: business, hosting, mobile, residential.")]
 TimeoutOpt = Annotated[Optional[float], typer.Option("--timeout", help="Request timeout in seconds.")]
 OutputOpt = Annotated[str, typer.Option("--output", help="Output mode: json (structured) or raw (body only).")]
 FollowOpt = Annotated[bool, typer.Option("--follow-redirects", help="Follow HTTP redirects.")]
@@ -213,6 +213,8 @@ def _do_request(
             "body": _try_parse_json(resp.text),
             "spacerouter": {
                 "request_id": resp.request_id,
+                "node_id": resp.node_id,
+                "routing_tag": resp.routing_tag,
             },
         })
 
@@ -318,6 +320,8 @@ def _do_paid_request(
         "body": _try_parse_json(resp.text),
         "spacerouter": {
             "request_id": resp.request_id,
+            "node_id": resp.node_id,
+            "routing_tag": resp.routing_tag,
             "payer_address": consumer.address,
             "payment_mode": "escrow",
         },

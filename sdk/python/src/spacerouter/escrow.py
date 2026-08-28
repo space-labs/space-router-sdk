@@ -168,8 +168,8 @@ class EscrowClient:
         tx_hash = self._w3.eth.send_raw_transaction(signed.raw_transaction)
         receipt = self._w3.eth.wait_for_transaction_receipt(tx_hash, timeout=120)
         if receipt["status"] != 1:
-            raise RuntimeError(f"Transaction reverted: {tx_hash.hex()}")
-        return tx_hash.hex()
+            raise RuntimeError(f"Transaction reverted: {tx_hash.to_0x_hex()}")
+        return tx_hash.to_0x_hex()
 
     def deposit(self, amount: int) -> str:
         """Deposit SPACE tokens into escrow. Returns tx hash."""

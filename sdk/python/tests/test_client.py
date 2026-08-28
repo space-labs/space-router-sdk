@@ -328,9 +328,9 @@ class TestIpTypeRouting:
 
     def test_with_routing_passes_both(self):
         client = SpaceRouter("sr_live_test")
-        routed = client.with_routing(region="US", ip_type="datacenter")
+        routed = client.with_routing(region="US", ip_type="business")
         assert routed._region == "US"
-        assert routed._ip_type == "datacenter"
+        assert routed._ip_type == "business"
         client.close()
         routed.close()
 

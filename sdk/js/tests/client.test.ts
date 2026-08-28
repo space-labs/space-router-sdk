@@ -491,6 +491,55 @@ describe("SpaceRouter", () => {
     client.close();
   });
 
+  it("sends the region without disabling the managed fallback", async () => {
+    // Routing already honours the region: the coordinator filters home nodes
+    // to it and the managed fallback is country-targeted to the same region.
+    // Sending Strict-Routing turned `--region US` into a 503 wherever that
+    // country had no home node online.
+    let captured: any;
+    fetchSpy.mockImplementation(async (_u: any, init: any) => {
+      captured = init?.dispatcher;
+      return makeResponse(200);
+    });
+    const client = new SpaceRouter("sr_live_test", { region: "AQ" });
+    await client.get("http://example.com");
+    const h = getConnectHeaders(captured);
+    expect(h["X-SpaceRouter-Region"]).toBe("AQ");
+    expect(h["X-SpaceRouter-Strict-Routing"]).toBeUndefined();
+    client.close();
+  });
+
+  it("omits Strict-Routing when only ipType is requested", async () => {
+    let captured: any;
+    fetchSpy.mockImplementation(async (_u: any, init: any) => {
+      captured = init?.dispatcher;
+      return makeResponse(200);
+    });
+    const client = new SpaceRouter("sr_live_test", { ipType: "mobile" });
+    await client.get("http://example.com");
+    const h = getConnectHeaders(captured);
+    expect(h["X-SpaceRouter-IP-Type"]).toBe("mobile");
+    expect(h["X-SpaceRouter-Strict-Routing"]).toBeUndefined();
+    client.close();
+  });
+
+  it("rejects an ipType the gateway answers with 400", () => {
+    // Removing `datacenter` from the IpType union is compile-time only;
+    // a plain string from a CLI flag still reached the gateway and 400'd.
+    for (const bad of ["datacenter", "Residential", "bogus"]) {
+      expect(
+        () => new SpaceRouter("sr_live_test", { ipType: bad as any }),
+      ).toThrow("ipType must be one of");
+    }
+  });
+
+  it("accepts every ipType the gateway accepts", () => {
+    for (const ok of ["residential", "mobile", "business", "hosting"]) {
+      const client = new SpaceRouter("sr_live_test", { ipType: ok as any });
+      client.close();
+    }
+  });
+
   it("rejects invalid region", () => {
     expect(() => new SpaceRouter("sr_live_test", { region: "Seoul, KR" })).toThrow(
       "2-letter country code",

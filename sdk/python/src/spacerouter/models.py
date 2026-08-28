@@ -11,7 +11,7 @@ from pydantic import BaseModel, computed_field, model_validator
 # Routing & filtering types
 # ---------------------------------------------------------------------------
 
-IpType = Literal["residential", "mobile", "datacenter", "business"]
+IpType = Literal["residential", "mobile", "business", "hosting"]
 """IP address type for filtering proxy nodes."""
 
 NodeStatus = Literal["offline", "draining"]
@@ -206,23 +206,35 @@ class VouchingSignature(BaseModel):
     timestamp: int
 
 
+CONNECT_METADATA_EXTENSION = "spacerouter_connect_metadata"
+"""``httpx.Response.extensions`` key holding the captured CONNECT headers."""
+
+HEADER_NODE_ID = "x-spacerouter-node"
+HEADER_REQUEST_ID = "x-spacerouter-request-id"
+HEADER_ROUTING_TAG = "x-spacerouter-routing"
+
+
+def read_response_metadata(response: httpx.Response, header: str) -> str | None:
+    """Read a SpaceRouter header, preferring the captured CONNECT response."""
+    captured = response.extensions.get(CONNECT_METADATA_EXTENSION) or {}
+    return captured.get(header) or response.headers.get(header)
+
+
 class ProxyResponse:
     """Thin wrapper around :class:`httpx.Response` with SpaceRouter metadata.
 
-    Exposes ``request_id`` from response headers and delegates everything
-    else to the underlying httpx response.
+    Exposes ``request_id``, ``node_id`` and ``routing_tag`` and delegates
+    everything else to the underlying httpx response.
 
-    HTTPS targets — known limitation
-    --------------------------------
-    For HTTP target URLs the gateway injects ``X-SpaceRouter-Request-Id``
-    into the inner response and ``request_id`` works as expected. For
-    HTTPS target URLs the gateway only sees the proxy ``CONNECT`` (the
-    inner request is end-to-end TLS), so it can only stamp the request
-    ID on the ``CONNECT 200`` response — and httpx does not surface
-    ``CONNECT`` response headers to callers. As a result,
-    ``request_id`` is ``None`` for HTTPS targets in the Python SDK
-    today. The gateway-side ID still exists and shows up in
-    server-side logs; correlate by timestamp + node-id if needed.
+    For HTTP target URLs the gateway injects the ``X-SpaceRouter-*``
+    headers into the inner response. For HTTPS target URLs the inner
+    exchange is end-to-end TLS and opaque to the gateway, so it stamps
+    the same headers on the ``CONNECT 200`` response instead. httpcore
+    consumes that CONNECT response internally, so the client captures
+    the headers at the connection layer and hands them over in
+    ``response.extensions[CONNECT_METADATA_EXTENSION]``. Both target
+    schemes therefore populate all three properties; SOCKS5 has no
+    CONNECT header concept and only the inner-response fallback applies.
     """
 
     def __init__(self, response: httpx.Response) -> None:
@@ -230,14 +242,18 @@ class ProxyResponse:
 
     @property
     def request_id(self) -> str | None:
-        """Unique request ID for tracing (``X-SpaceRouter-Request-Id``).
+        """Unique request ID for tracing (``X-SpaceRouter-Request-Id``)."""
+        return read_response_metadata(self._response, HEADER_REQUEST_ID)
 
-        Populated for HTTP target URLs (gateway injects on the inner
-        response). Returns ``None`` for HTTPS targets — see the class
-        docstring for the architectural reason. Use server-side logs
-        plus timestamp / node-id to correlate HTTPS requests.
-        """
-        return self._response.headers.get("x-spacerouter-request-id")
+    @property
+    def node_id(self) -> str | None:
+        """ID of the Provider that served this request (``X-SpaceRouter-Node``)."""
+        return read_response_metadata(self._response, HEADER_NODE_ID)
+
+    @property
+    def routing_tag(self) -> str | None:
+        """Gateway routing decision — ``"home"`` or ``"fallback"``."""
+        return read_response_metadata(self._response, HEADER_ROUTING_TAG)
 
     def __getattr__(self, name: str) -> Any:
         return getattr(self._response, name)
