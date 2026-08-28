@@ -11,7 +11,7 @@ from pydantic import BaseModel, computed_field, model_validator
 # Routing & filtering types
 # ---------------------------------------------------------------------------
 
-IpType = Literal["residential", "mobile", "business"]
+IpType = Literal["residential", "mobile", "business", "hosting"]
 """IP address type for filtering proxy nodes."""
 
 NodeStatus = Literal["offline", "draining"]

@@ -59,6 +59,24 @@ function validateRegion(region: string): void {
   }
 }
 
+const VALID_IP_TYPES = ["business", "hosting", "mobile", "residential"];
+
+/**
+ * Throw if ipType is not a value the gateway accepts.
+ *
+ * The gateway answers an unknown `X-SpaceRouter-IP-Type` with 400 Bad
+ * Request, so rejecting it here turns a wasted round trip into an
+ * immediate, readable error. `datacenter` in particular used to be
+ * advertised by this SDK and has never been accepted.
+ */
+function validateIpType(ipType: string): void {
+  if (!VALID_IP_TYPES.includes(ipType)) {
+    throw new Error(
+      `ipType must be one of: ${VALID_IP_TYPES.join(", ")}; got "${ipType}"`,
+    );
+  }
+}
+
 /** Options passed through to individual requests. */
 export interface RequestOptions {
   headers?: Record<string, string>;
@@ -117,10 +135,7 @@ function buildAgent(
   const proxyHeaders: Record<string, string> = {
     "Proxy-Authorization": `Basic ${Buffer.from(`${apiKey}:`).toString("base64")}`,
   };
-  if (region) {
-    proxyHeaders["X-SpaceRouter-Region"] = region;
-    proxyHeaders["X-SpaceRouter-Strict-Routing"] = "1";
-  }
+  if (region) proxyHeaders["X-SpaceRouter-Region"] = region;
   if (ipType) proxyHeaders["X-SpaceRouter-IP-Type"] = ipType;
 
   // `verify: false` toggles TLS cert verification for both the gateway
@@ -276,6 +291,7 @@ export class SpaceRouter {
     this._region = options?.region;
     this._ipType = options?.ipType;
     if (this._region) validateRegion(this._region);
+    if (this._ipType) validateIpType(this._ipType);
     this._timeout = options?.timeout ?? DEFAULT_TIMEOUT;
     this._verify = options?.verify ?? true;
     this._agent = buildAgent(
@@ -328,10 +344,7 @@ export class SpaceRouter {
         "Proxy-Authorization": `Basic ${Buffer.from(`${this._apiKey}:`).toString("base64")}`,
         ...paymentHeaders,
       };
-      if (this._region) {
-        connectHeaders["X-SpaceRouter-Region"] = this._region;
-        connectHeaders["X-SpaceRouter-Strict-Routing"] = "1";
-      }
+      if (this._region) connectHeaders["X-SpaceRouter-Region"] = this._region;
       if (this._ipType) connectHeaders["X-SpaceRouter-IP-Type"] = this._ipType;
       const tlsOpts = this._verify
         ? undefined

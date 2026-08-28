@@ -204,12 +204,28 @@ _DEFAULT_HTTP_GATEWAY = "https://gateway.spacerouter.org"
 
 _REGION_RE = __import__("re").compile(r"^[A-Z]{2}$")
 
+_VALID_IP_TYPES = frozenset(("residential", "mobile", "business", "hosting"))
+
 
 def _validate_region(region: str) -> None:
     """Raise ``ValueError`` if *region* is not a 2-letter country code."""
     if not _REGION_RE.match(region):
         raise ValueError(
             f"region must be a 2-letter country code (ISO 3166-1 alpha-2), got {region!r}"
+        )
+
+
+def _validate_ip_type(ip_type: str) -> None:
+    """Raise ``ValueError`` if *ip_type* is not a value the gateway accepts.
+
+    The gateway answers an unknown ``X-SpaceRouter-IP-Type`` with 400 Bad
+    Request, so rejecting it here turns a wasted round trip into an
+    immediate, readable error. ``datacenter`` in particular used to be
+    advertised by this SDK and has never been accepted.
+    """
+    if ip_type not in _VALID_IP_TYPES:
+        raise ValueError(
+            f"ip_type must be one of: {', '.join(sorted(_VALID_IP_TYPES))}; got {ip_type!r}"
         )
 
 
@@ -247,8 +263,8 @@ def _build_proxy(
     if region:
         _validate_region(region)
         proxy_headers["X-SpaceRouter-Region"] = region
-        proxy_headers["X-SpaceRouter-Strict-Routing"] = "1"
     if ip_type:
+        _validate_ip_type(ip_type)
         proxy_headers["X-SpaceRouter-IP-Type"] = ip_type
 
     return httpx.Proxy(proxy_url, headers=proxy_headers)

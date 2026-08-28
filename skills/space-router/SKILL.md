@@ -135,7 +135,7 @@ curl -x "$SPACE_ROUTER_PROXY_URL" -H "X-SpaceRouter-Region: US" https://httpbin.
 
 ## IP Type Filtering
 
-Filter proxy nodes by IP address type: `residential`, `mobile`, `datacenter`, or `business`.
+Filter proxy nodes by IP address type: `residential`, `mobile`, `business`, or `hosting`.
 
 **Python:**
 

@@ -34,7 +34,7 @@ ApiKeyOpt = Annotated[Optional[str], typer.Option("--api-key", help="API key for
 GatewayOpt = Annotated[Optional[str], typer.Option("--gateway-url", help="Proxy gateway URL.")]
 HeaderOpt = Annotated[Optional[list[str]], typer.Option("--header", "-H", help="Custom header (Name: Value). Repeatable.")]
 RegionOpt = Annotated[Optional[str], typer.Option("--region", help="2-letter country code (e.g. US, KR).")]
-IpTypeOpt = Annotated[Optional[str], typer.Option("--ip-type", help="IP type filter: residential, mobile, business.")]
+IpTypeOpt = Annotated[Optional[str], typer.Option("--ip-type", help="IP type filter: business, hosting, mobile, residential.")]
 TimeoutOpt = Annotated[Optional[float], typer.Option("--timeout", help="Request timeout in seconds.")]
 OutputOpt = Annotated[str, typer.Option("--output", help="Output mode: json (structured) or raw (body only).")]
 FollowOpt = Annotated[bool, typer.Option("--follow-redirects", help="Follow HTTP redirects.")]
