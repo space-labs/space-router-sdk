@@ -75,7 +75,7 @@ jobs:
           VERSION=$(node -e "console.log(require('./package.json').version)")
           if [[ "$VERSION" == *-* ]]; then TAG=rc; else TAG=latest; fi
           echo "Publishing $VERSION under dist-tag '$TAG'"
-          npm publish --access public --tag "$TAG"
+          npm publish --provenance --access public --tag "$TAG"
 
   gh-release:
     name: Create GitHub Release
