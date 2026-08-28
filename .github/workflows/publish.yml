@@ -75,8 +75,13 @@ jobs:
       - name: Publish (rc tag for prereleases, latest for stable)
         working-directory: sdk/js
         run: |
+          NAME=$(node -e "console.log(require('./package.json').name)")
           VERSION=$(node -e "console.log(require('./package.json').version)")
           if [[ "$VERSION" == *-* ]]; then TAG=rc; else TAG=latest; fi
+          if npm view "$NAME@$VERSION" version >/dev/null 2>&1; then
+            echo "$NAME@$VERSION is already published, skipping"
+            exit 0
+          fi
           echo "Publishing $VERSION under dist-tag '$TAG'"
           npm publish --provenance --access public --tag "$TAG"
 
