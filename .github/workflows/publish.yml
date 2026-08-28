@@ -60,10 +60,13 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
-          node-version: "20"
-          registry-url: "https://registry.npmjs.org"
+          node-version: "22"
       # Trusted publishing needs a newer npm than any Node release bundles.
-      - run: npm install -g npm@latest
+      # Pinned to 11.x: npm 12 requires Node 22.22+, which the runner may not
+      # have yet. registry-url is deliberately unset so setup-node does not
+      # write an .npmrc pointing at an empty NODE_AUTH_TOKEN, which would
+      # shadow the OIDC exchange.
+      - run: npm install -g npm@11
       - run: npm --version
       - run: npm install
         working-directory: sdk/js
